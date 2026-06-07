@@ -1,0 +1,76 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: talent_hub_test
+        ports: ["5432:5432"]
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://user:password@localhost:5432/talent_hub_test
+          REDIS_URL: redis://localhost:6379
+          SECRET_KEY: test-secret
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          cd backend
+          pytest tests/unit -v -m unit
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://user:password@localhost:5432/talent_hub_test
+          REDIS_URL: redis://localhost:6379
+          SECRET_KEY: test-secret
+        run: |
+          cd backend
+          pytest tests/integration -v -m integration
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff black
+      - run: |
+          cd backend
+          ruff check app/
+          black --check app/
+
+  build:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -f docker/Dockerfile -t ai-talent-hub:${{ github.sha }} backend/
