@@ -2,14 +2,17 @@ from fastapi import UploadFile
 from app.agents.candidate.resume_parser import ResumeParserAgent
 from app.database.postgres import AsyncSessionLocal
 from app.database.models import Resume
+from pathlib import Path
 import pypdf
 import io
 import os
 
+UPLOAD_DIR = Path("uploads/resumes")
 
 class ResumeService:
     def __init__(self):
         self.parser = ResumeParserAgent()
+        
 
     async def upload_and_parse(self, file: UploadFile, user_id: str) -> dict:
         content = await file.read()
@@ -27,5 +30,11 @@ class ResumeService:
         return " ".join(page.extract_text() for page in reader.pages)
 
     async def _upload_to_blob(self, content: bytes, filename: str) -> str:
-        # Azure Blob Storage upload (implement with azure-storage-blob)
-        return f"https://storage.blob.core.windows.net/resumes/{filename}"
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+        file_path = UPLOAD_DIR / filename
+
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        return str(file_path)
