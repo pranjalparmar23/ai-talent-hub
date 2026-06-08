@@ -1,12 +1,13 @@
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
 import os
 
-
-def get_openai_llm(temperature: float = 0):
-    return ChatOpenAI(model="gpt-4o", temperature=temperature, openai_api_key=os.getenv("OPENAI_API_KEY"))
+from langchain_groq import ChatGroq
 
 
-def get_claude_llm(temperature: float = 0):
-    return ChatAnthropic(model="claude-sonnet-4-20250514", temperature=temperature,
-                         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"))
+def get_groq_llm(temperature: float = 0):
+    return ChatGroq(
+        model="llama-3.3-70b-versatile
+",
+        temperature=temperature,
+        groq_api_key=os.getenv("GROQ_API_KEY")
+    )
+

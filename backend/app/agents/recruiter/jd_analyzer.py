@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from app.llm.prompts.jd_prompts import JD_ANALYSIS_PROMPT
 import json
@@ -6,7 +6,7 @@ import json
 
 class JDAnalyzerAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
         self.prompt = ChatPromptTemplate.from_template(JD_ANALYSIS_PROMPT)
 
     async def analyze(self, jd_text: str) -> dict:

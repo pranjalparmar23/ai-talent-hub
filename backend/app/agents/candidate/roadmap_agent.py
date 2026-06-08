@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from app.llm.prompts.roadmap_prompts import ROADMAP_PROMPT
 from app.rag.retriever import RAGRetriever
@@ -7,7 +7,7 @@ import json
 
 class RoadmapAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.3)
         self.prompt = ChatPromptTemplate.from_template(ROADMAP_PROMPT)
         self.retriever = RAGRetriever()
 

@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from app.llm.prompts.evaluation_prompts import EVALUATION_PROMPT
 import json
@@ -6,7 +6,7 @@ import json
 
 class EvaluationAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
         self.prompt = ChatPromptTemplate.from_template(EVALUATION_PROMPT)
 
     async def evaluate_interview(self, conversation_history: list) -> dict:

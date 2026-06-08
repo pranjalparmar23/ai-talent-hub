@@ -7,7 +7,7 @@ import pypdf
 import io
 import os
 
-UPLOAD_DIR = Path("uploads/resumes")
+UPLOAD_DIR = Path("data/resumes")
 
 class ResumeService:
     def __init__(self):

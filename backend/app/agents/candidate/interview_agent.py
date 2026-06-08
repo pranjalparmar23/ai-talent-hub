@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from app.llm.prompts.interview_prompts import INTERVIEW_PROMPT, FOLLOWUP_PROMPT
 from app.rag.retriever import RAGRetriever
@@ -7,7 +7,7 @@ import json
 
 class InterviewAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0.5)
+        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.5)
         self.retriever = RAGRetriever()
 
     async def start_session(self, company: str, role: str) -> dict:

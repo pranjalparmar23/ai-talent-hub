@@ -1,4 +1,4 @@
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from app.llm.prompts.recommendation_prompts import RECOMMENDATION_PROMPT
 import json
@@ -6,7 +6,7 @@ import json
 
 class HiringRecommendationAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
         self.prompt = ChatPromptTemplate.from_template(RECOMMENDATION_PROMPT)
 
     async def recommend(self, candidate_data: dict, match_score: float, interview_score: float) -> dict:
