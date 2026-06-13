@@ -1,0 +1,31 @@
+{
+  "documents": [
+    {
+      "content": "Two pointers technique: use two indices traversing an array, often in opposite directions or at different speeds. Classic use cases: reversing a string in place (left and right pointers moving inward), removing duplicates from a sorted array (slow/fast pointers), finding pairs with a target sum in a sorted array (left/right moving based on sum vs target). Time complexity is typically O(n) which beats nested-loop O(n²) approaches. The key insight: when the array has a sorted property or you can derive one, two pointers eliminate the need to recheck combinations. Practice problems: Two Sum II, Remove Duplicates from Sorted Array, Container With Most Water, 3Sum.",
+      "metadata": {
+        "topic": "two_pointers",
+        "category": "arrays",
+        "difficulty": "easy",
+        "leetcode_examples": "167,26,11,15"
+      }
+    },
+    {
+      "content": "Sliding window technique: maintain a window of elements that satisfies some constraint, expanding the right pointer when valid and contracting the left when invalid. Use cases: longest substring without repeating characters, minimum window substring, longest substring with K distinct characters, find all anagrams. The window can be fixed-size (e.g. 'max sum of K consecutive elements') or variable-size (e.g. 'longest substring with at most K distinct chars'). For variable-size, you typically use a hash map to track character counts inside the window. Common bug: forgetting to update the hash map when shrinking from the left. Trace through your code with a small example before declaring it done.",
+      "metadata": {
+        "topic": "sliding_window",
+        "category": "arrays",
+        "difficulty": "medium",
+        "leetcode_examples": "3,76,340,438"
+      }
+    },
+    {
+      "content": "Hash map patterns are the most common technique across all coding interviews. Three main use cases: (1) Frequency counting — count occurrences of elements, characters, or values. Use a Counter or defaultdict(int) in Python. (2) Index lookup — map value to its index for O(1) lookups, classic in Two Sum. (3) Group-by — bucket items by some key, like grouping anagrams by sorted characters. Common interview trick: when you see 'find pairs/triples that sum to X', think hash map. When you see 'count subarrays with sum K', think prefix sum + hash map. Practice problems: Two Sum, Group Anagrams, Subarray Sum Equals K, Longest Consecutive Sequence.",
+      "metadata": {
+        "topic": "hash_maps",
+        "category": "arrays",
+        "difficulty": "easy",
+        "leetcode_examples": "1,49,560,128"
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "content": "Modern Python backend stack in 2025: FastAPI is the dominant choice for new APIs due to its async support, automatic OpenAPI generation, and type hints. Django remains strong for full-featured applications needing admin, ORM, and templates out of the box. Flask is still used for simple services but has lost mindshare to FastAPI. For databases, SQLAlchemy 2.0+ with the async API is standard for relational work; for migrations use Alembic. PostgreSQL is the default relational choice. For async work, use asyncio with httpx for HTTP calls and asyncpg for direct Postgres access when you need maximum performance. For testing, pytest is the only choice that matters—learn fixtures, parametrize, and pytest-asyncio.",
+      "metadata": {
+        "topic": "python_backend",
+        "category": "backend",
+        "difficulty": "intermediate",
+        "frameworks": "fastapi,django,flask"
+      }
+    },
+    {
+      "content": "Python backend production essentials: Use Pydantic v2 for request/response validation—it's both faster and stricter than v1. Use python-dotenv or pydantic-settings for environment configuration. Use structlog for structured JSON logs that work well with log aggregators. Use Sentry or similar for error tracking. Use OpenTelemetry for distributed tracing. For dependency management, use uv (the new Rust-based pip replacement, dramatically faster) or Poetry; avoid bare pip + requirements.txt for production projects. Containerize with Docker using Python 3.12-slim as the base image. For deployment, gunicorn with uvicorn workers is the standard production server for FastAPI: gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker.",
+      "metadata": {
+        "topic": "python_backend",
+        "category": "backend",
+        "difficulty": "advanced"
+      }
+    }
+  ]
+}
