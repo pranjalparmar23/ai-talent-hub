@@ -1,43 +1,92 @@
 version: "3.9"
 
 services:
-  backend:
-    build:
-      context: ../backend
-      dockerfile: ../docker/Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - ../backend/.env
-    depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ../backend/app:/app/app
-
+  # ── PostgreSQL ────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
+    platform: linux/arm64/v8 
+    container_name: ath_postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: talent_hub
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-root}
+      POSTGRES_DB: ${POSTGRES_DB:-talent_hub}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ── Redis (interview session memory) ─────────────────────────
   redis:
     image: redis:7-alpine
+    platform: linux/arm64/v8
+    container_name: ath_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  frontend:
-    build:
-      context: ../frontend
+  # ── ChromaDB (vector store for RAG) ──────────────────────────
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    container_name: ath_chromadb
+    restart: unless-stopped
     ports:
-      - "3000:80"
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+      - IS_PERSISTENT=true
+      - PERSIST_DIRECTORY=/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── FastAPI Backend ──────────────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile
+    container_name: ath_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../backend/.env
+    environment:
+      # Override hostnames inside Docker network
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-root}@postgres:5432/${POSTGRES_DB:-talent_hub}
+      - REDIS_URL=redis://redis:6379
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
     depends_on:
-      - backend
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app
+      - ../data:/app/data
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:
+  redis_data:
+  chroma_data:

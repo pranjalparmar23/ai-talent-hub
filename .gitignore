@@ -1,0 +1,184 @@
+# ============================================================
+#  AI TALENT HUB — .gitignore
+#  FastAPI · LangGraph · React · TypeScript · Azure · Docker
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Python / Virtual Environments
+# ------------------------------------------------------------
+venv/
+.venv/
+env/
+.env/
+ENV/
+venv.bak/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.installed.cfg
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+lib/
+lib64/
+.eggs/
+wheels/
+
+
+# ------------------------------------------------------------
+# Environment Variables & Secrets  ← MOST IMPORTANT
+# ------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+.secrets/
+
+
+# ------------------------------------------------------------
+# Node / Frontend
+# ------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm/
+.yarn/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+*.tsbuildinfo
+
+
+# ------------------------------------------------------------
+# IDE & Editors
+# ------------------------------------------------------------
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+
+# ------------------------------------------------------------
+# Testing & Coverage
+# ------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+coverage/
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+test-results/
+junit.xml
+*.log
+
+
+# ------------------------------------------------------------
+# Database & Migrations (keep migration scripts, ignore locks)
+# ------------------------------------------------------------
+*.sqlite
+*.sqlite3
+*.db
+alembic/versions/*.pyc
+
+
+# ------------------------------------------------------------
+# Docker
+# ------------------------------------------------------------
+docker/postgres-data/
+docker/redis-data/
+.docker/
+
+
+# ------------------------------------------------------------
+# Azure / Cloud Credentials
+# ------------------------------------------------------------
+.azure/
+azureauth.json
+*.publishsettings
+ServiceConfiguration.*.cscfg
+*.azureauth
+
+
+# ------------------------------------------------------------
+# LangSmith / LangChain Cache
+# ------------------------------------------------------------
+.langchain/
+.langgraph/
+langsmith_cache/
+
+
+# ------------------------------------------------------------
+# Uploads & Generated Files
+# ------------------------------------------------------------
+backend/uploads/
+backend/media/
+backend/static/collected/
+*.pdf
+*.docx
+*.xlsx
+!docs/**/*.pdf
+
+
+# ------------------------------------------------------------
+# Kubernetes / Terraform State
+# ------------------------------------------------------------
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+kubeconfig
+*.kubeconfig
+
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+logs/
+*.log
+*.log.*
+npm-debug.log
+yarn-debug.log
+
+
+# ------------------------------------------------------------
+# OS
+# ------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini

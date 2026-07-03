@@ -24,7 +24,11 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (data: object) => api.post("/auth/register", data),
   login: (email: string, password: string) =>
-    api.post("/auth/login", new URLSearchParams({ username: email, password })),
+    api.post(
+      "/auth/login",
+      new URLSearchParams({ username: email, password }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    ),
   logout: () => api.post("/auth/logout"),
 };
 
