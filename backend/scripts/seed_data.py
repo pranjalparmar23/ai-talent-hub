@@ -17,6 +17,15 @@ Each /data/<collection_name>/ folder contains JSON files with this shape:
 Re-running is safe — the script clears each collection before re-seeding,
 so you can edit JSON files and re-run without duplicates.
 """
+
+# ── Silence ChromaDB PostHog telemetry (must be BEFORE any other imports) ──
+try:
+    import posthog
+    posthog.capture = lambda *args, **kwargs: None
+    posthog.Posthog.capture = lambda *args, **kwargs: None
+except ImportError:
+    pass
+    
 import sys
 import os
 import json
@@ -133,7 +142,7 @@ def main() -> int:
         # Load fresh data from /data/<name>/
         docs, metas = load_collection_data(spec.name)
         if not docs:
-            print(f"   ⏭️  No data to seed")
+            print("\n⏭️  No data to seed")
             continue
 
         chunks = retriever.add_documents(spec.name, docs, metas)
