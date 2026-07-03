@@ -49,7 +49,7 @@ export default function Login() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">AI Talent Hub</h1>
+          <h4 className="text-2xl font-bold text-slate-900">AI Recruitment and Multi - Agent Interview Preparation Platform</h4>
           <p className="text-slate-500 mt-2">Sign in to your account</p>
         </div>
 
