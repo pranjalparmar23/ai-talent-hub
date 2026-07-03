@@ -1,0 +1,28 @@
+{
+  "documents": [
+    {
+      "content": "The STAR framework for behavioral interview answers: Situation (set the context — when, where, who was involved, what was the team trying to do), Task (what specifically were YOU responsible for; what was the goal or challenge), Action (the concrete steps YOU took — this is the longest part, 60% of your answer), Result (the outcome with metrics where possible, and what you learned). The most common STAR mistake is overweighting Situation — burning 90 seconds setting up context for a 2-minute answer. Aim for 15% Situation, 15% Task, 60% Action, 10% Result. Another common mistake: using 'we' instead of 'I' — interviewers cannot evaluate the team, only you, so frame your contributions clearly.",
+      "metadata": {
+        "topic": "star_method",
+        "category": "framework",
+        "difficulty": "essential"
+      }
+    },
+    {
+      "content": "How to prepare behavioral stories — the 10-story method: pick 10 of your most impactful projects or moments over the past 2-5 years. For each, write 1-2 paragraphs covering Situation/Task/Action/Result. Then categorize each story by which behavioral theme it best illustrates: leadership, conflict, ambiguity, failure, mentorship, technical depth, customer impact, scope expansion, cross-team influence, ethical decision. A single well-prepared story can answer 3-4 different question variants if framed correctly. Practice telling each story out loud to a friend or recorder; the goal is 2-3 minutes per story, polished but not memorized to sound robotic.",
+      "metadata": {
+        "topic": "story_preparation",
+        "category": "preparation",
+        "difficulty": "essential"
+      }
+    },
+    {
+      "content": "Behavioral answer pitfalls that cost candidates the offer: (1) Generic answers without specifics — 'I led a team and we improved performance' tells the interviewer nothing. Give numbers, names, dates, technologies. (2) Painting yourself as a hero — claiming sole credit for team accomplishments rings false. (3) Bashing former colleagues or managers — even if justified, it signals you might do the same here. (4) Refusing to answer 'tell me about a failure' or giving a humblebrag fake failure like 'I'm too detail-oriented'. (5) Going over time — keep each story under 3 minutes; interviewer will ask follow-ups if they want more. (6) Not connecting the story back to the question. Land the answer with a clear closing sentence tying back to what was asked.",
+      "metadata": {
+        "topic": "pitfalls",
+        "category": "framework",
+        "difficulty": "essential"
+      }
+    }
+  ]
+}

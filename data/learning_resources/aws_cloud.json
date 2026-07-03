@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "content": "AWS is the leading cloud platform with 200+ services, but you only need to know roughly 15 well for most backend roles. The essential AWS services: EC2 (virtual machines), S3 (object storage), RDS (managed relational databases), Lambda (serverless functions), DynamoDB (NoSQL database), SQS (message queue), SNS (pub/sub messaging), CloudFront (CDN), Route 53 (DNS), IAM (identity and access management), VPC (networking), CloudWatch (monitoring and logs), ECS or EKS (container orchestration), API Gateway, and CloudFormation or CDK (infrastructure as code). Start with the AWS Solutions Architect Associate certification—it forces you to understand all of these at a foundational level. Allow 2-3 months of study while working full-time.",
+      "metadata": {
+        "topic": "aws",
+        "category": "cloud",
+        "difficulty": "intermediate",
+        "estimated_hours": 100
+      }
+    },
+    {
+      "content": "Free AWS learning resources that actually work: AWS Skill Builder (skillbuilder.aws) has free tier courses on every service. AWS Workshops (workshops.aws) provides hands-on labs you complete in your own account. Stephane Maarek's Udemy courses are paid but go on frequent sale for $10-20 and are considered the best for cert prep. For hands-on practice without cost, AWS Free Tier gives you 12 months of free resources for small services. Pay attention to your bill—set up Budgets alerts at $5 and $10 to avoid surprise charges. For real-world architecture patterns, study the AWS Well-Architected Framework white paper and the AWS architecture center case studies.",
+      "metadata": {
+        "topic": "aws",
+        "category": "cloud",
+        "resource_type": "courses"
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "documents": [
+    {
+      "content": "Tree traversal: every coding interviewer expects you to do BFS and DFS in your sleep. BFS (level-order) uses a queue, visits nodes layer by layer, and is the go-to for shortest path in unweighted graphs and 'minimum steps' problems. DFS uses a stack (or recursion, which is implicit stack), goes deep before wide, and is the natural choice for problems involving root-to-leaf paths, tree structure validation, or backtracking. Memorize the three recursive DFS templates: preorder (root → left → right), inorder (left → root → right, gives sorted order for BSTs), postorder (left → right → root, useful when you need children's results before processing the node). Practice: Binary Tree Level Order Traversal, Validate BST, Lowest Common Ancestor.",
+      "metadata": {
+        "topic": "tree_traversal",
+        "category": "trees",
+        "difficulty": "medium",
+        "leetcode_examples": "102,98,236"
+      }
+    },
+    {
+      "content": "Graph BFS vs DFS decision: use BFS when you need the shortest path (in unweighted graphs), level-by-level processing, or to find the closest node matching a condition. Use DFS when you're exploring all paths, detecting cycles, doing topological sort, or finding connected components. For weighted graphs, BFS doesn't give shortest path — you need Dijkstra (heap-based BFS) or Bellman-Ford (handles negative weights). For 2D grids treated as graphs: directions = [(0,1),(0,-1),(1,0),(-1,0)] is the four-direction template; add diagonals for eight-direction. Always check bounds and a visited set to avoid infinite loops. Practice: Number of Islands, Course Schedule, Word Ladder, Network Delay Time.",
+      "metadata": {
+        "topic": "graph_traversal",
+        "category": "graphs",
+        "difficulty": "medium",
+        "leetcode_examples": "200,207,127,743"
+      }
+    },
+    {
+      "content": "Common tree/graph problems and the techniques they require: 'Find depth/height of a tree' → DFS, return 1 + max(left, right). 'Find lowest common ancestor' → DFS, return non-null subtree results. 'Serialize/deserialize tree' → BFS with sentinel for null, or preorder DFS. 'Detect cycle in directed graph' → DFS with 3-color marking (white/gray/black) or topological sort with in-degree counting. 'Detect cycle in undirected graph' → DFS tracking parent, or union-find. 'Number of connected components' → DFS/BFS from each unvisited node, count starts. 'Shortest path in unweighted graph' → BFS. 'Shortest path with weights' → Dijkstra with min-heap.",
+      "metadata": {
+        "topic": "tree_graph_patterns",
+        "category": "trees_graphs",
+        "difficulty": "medium"
+      }
+    }
+  ]
+}

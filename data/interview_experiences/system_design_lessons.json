@@ -1,0 +1,27 @@
+{
+  "documents": [
+    {
+      "content": "Five common system design interview failures I've witnessed as an interviewer over 100+ loops: (1) Drawing before requirements — candidate immediately reaches for the whiteboard and draws an architecture that doesn't match what we actually need. (2) Premature optimization — talking about sharding and caching for a system that has 100 users. (3) Memorized answers — candidate parrots the LeetCode 'Design Twitter' answer even when asked about a different problem. (4) Ignoring non-functional requirements — never asks about latency targets, throughput, consistency, durability. (5) Refusing to commit — keeps saying 'it depends' without making any actual design decisions when pushed.",
+      "metadata": {
+        "category": "system_design",
+        "perspective": "interviewer",
+        "lesson_type": "failure_modes"
+      }
+    },
+    {
+      "content": "What separates good from great system design candidates: great candidates have opinions and defend them, but update their views when given new information. They know when to use a NoSQL database vs SQL, and can articulate *why* — not just citing 'NoSQL scales better' but actually explaining the consistency model and access patterns. They estimate before designing — not just 'this is a big system' but 'we have 100M users posting on average twice a day, so 200M writes per day, ~2300 writes per second average, peak maybe 10x that at 23k writes/sec, each post is ~1KB so 200GB of new data per day'. They identify the hardest part of the problem early and spend the most time there.",
+      "metadata": {
+        "category": "system_design",
+        "perspective": "interviewer",
+        "lesson_type": "differentiators"
+      }
+    },
+    {
+      "content": "System design problems I see most often in 2024-2025 interviews: design a URL shortener (warmup, but candidates still mess it up), design a chat application like WhatsApp (tests messaging patterns, presence, offline delivery), design a feed like Twitter or Instagram (fan-out on write vs read tradeoffs), design a rate limiter (token bucket vs leaky bucket), design a distributed cache (consistent hashing, replication), design a notification system (fan-out, dedup, retries), design Uber/Lyft dispatch (geospatial indexing, real-time matching), design a payment system (idempotency, eventual consistency, compliance), design a search autocomplete (tries, ranking, freshness). For each of these, study the canonical solution but also be ready to discuss what changes if requirements shift.",
+      "metadata": {
+        "category": "system_design",
+        "common_questions": true
+      }
+    }
+  ]
+}

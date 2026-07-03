@@ -148,6 +148,7 @@ backend/static/collected/
 *.docx
 *.xlsx
 !docs/**/*.pdf
+data/eval/results
 
 
 # ------------------------------------------------------------

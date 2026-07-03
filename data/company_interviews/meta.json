@@ -1,0 +1,29 @@
+{
+  "documents": [
+    {
+      "content": "Meta (Facebook) interviews are more performance-driven than Google. The coding rounds at E4/E5 are 35-40 minutes and they want to see TWO problems solved per round, not just one — which means your speed matters a lot. Practice solving LeetCode medium problems in 15-20 minutes consistently. The questions are drawn from a known internal question bank, and many leak to LeetCode under the 'Facebook' tag — go through the top 100 Facebook-tagged questions on LeetCode and you'll see a lot of overlap with real interviews.",
+      "metadata": {
+        "company": "Meta",
+        "category": "coding",
+        "topic": "speed_expectation",
+        "year": 2025
+      }
+    },
+    {
+      "content": "Meta's loop typically has 5 rounds: 2 coding, 1 system design (E5+), 1 'Jedi' behavioral round (focused on cross-functional collaboration and impact), and 1 'Pirate' round (focused on culture fit and execution style). The Jedi vs Pirate naming is internal slang you might not hear from your recruiter. Jedi questions probe how you handle ambiguity, conflict, and influencing without authority. Pirate questions are more about execution speed and bias to action. Both rounds use the BAR framework internally — Background, Action, Result.",
+      "metadata": {
+        "company": "Meta",
+        "category": "interview_loop",
+        "topic": "round_types"
+      }
+    },
+    {
+      "content": "Meta system design problems heavily favor consumer-scale social/messaging systems: design Instagram feed, design WhatsApp messaging, design Facebook Live streaming, design news feed ranking, design notification delivery, design typeahead/search autocomplete, design ad serving and ranking. They expect candidates to handle billion-user scale comfortably. Be ready to discuss: consistent hashing, sharded databases, write-ahead logs, message queues at scale, edge caching, regional failover, and the read-vs-write tradeoffs of feed generation (fan-out on write for celebrities-with-followers vs read-time aggregation for regular users — Meta uses a hybrid model).",
+      "metadata": {
+        "company": "Meta",
+        "category": "system_design",
+        "topic": "common_problems"
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "documents": [
+    {
+      "content": "Kubernetes is an open-source container orchestration platform that automates deployment, scaling, and management of containerized applications. It was originally developed by Google based on their internal Borg system, then donated to the Cloud Native Computing Foundation (CNCF) in 2015. The core unit of work in Kubernetes is the Pod, which encapsulates one or more containers that share networking and storage. Pods are typically managed by higher-level controllers like Deployments, StatefulSets, or DaemonSets rather than created directly. To learn Kubernetes effectively, start with the official Kubernetes documentation tutorials, then practice on a local cluster using Minikube or kind. The 'Kubernetes the Hard Way' tutorial by Kelsey Hightower is the gold standard for understanding how the components fit together.",
+      "metadata": {
+        "topic": "kubernetes",
+        "category": "devops",
+        "difficulty": "intermediate",
+        "estimated_hours": 40
+      }
+    },
+    {
+      "content": "Key Kubernetes concepts every backend engineer should know: Pods (smallest deployable unit), Services (stable networking endpoint for a set of pods), Deployments (declarative updates for pods and replica sets), ConfigMaps and Secrets (configuration and sensitive data), Namespaces (virtual cluster partitioning), Ingress (HTTP/HTTPS routing into the cluster), Persistent Volumes (storage abstraction). For production readiness, you also need to understand resource requests and limits, liveness and readiness probes, horizontal pod autoscaling, and RBAC. Recommended learning path: complete the official tutorial, then build a small app and deploy it through CI/CD with kubectl, then learn Helm charts for templating, finally practice on a managed cluster like GKE or EKS.",
+      "metadata": {
+        "topic": "kubernetes",
+        "category": "devops",
+        "difficulty": "intermediate",
+        "concepts": "pods,services,deployments,configmaps"
+      }
+    },
+    {
+      "content": "Free Kubernetes learning resources: Kubernetes Official Documentation (kubernetes.io/docs) is the most authoritative and is updated for every release. KubeAcademy by VMware offers free video courses from beginner to advanced. The CNCF YouTube channel hosts KubeCon talks where you can learn from production case studies. Katacoda's Kubernetes scenarios let you practice in a browser-based terminal. For book learning, 'Kubernetes Up & Running' by Kelsey Hightower is excellent for beginners, and 'Kubernetes Patterns' by Bilgin Ibryam covers production-grade patterns. Allocate roughly 4-6 weeks of consistent study to reach intermediate competence.",
+      "metadata": {
+        "topic": "kubernetes",
+        "category": "devops",
+        "resource_type": "courses_and_books"
+      }
+    }
+  ]
+}

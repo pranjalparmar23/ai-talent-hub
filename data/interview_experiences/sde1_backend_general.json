@@ -1,0 +1,30 @@
+{
+  "documents": [
+    {
+      "content": "I interviewed for SDE-1 backend roles at five mid-to-large tech companies in 2024. The process typically had four stages: an online assessment (1-2 hours), a phone screen (45 min), a technical loop (3-5 interviews in one day), and finally a hiring committee or bar raiser review. Every company asked at least one data structures and algorithms question, but the depth varied significantly. Startups went lighter on algorithms and heavier on practical coding — building a small feature, debugging a piece of code, or reviewing a PR. Big tech leaned hard on algorithms and system design even at SDE-1 level. The behavioral round was a constant across all five — usually 30-45 minutes covering past projects, conflict resolution, and learning experiences.",
+      "metadata": {
+        "role": "SDE-1",
+        "category": "backend",
+        "experience_level": "entry",
+        "year": 2024,
+        "rounds": 4
+      }
+    },
+    {
+      "content": "Online assessment patterns for backend SDE-1: most companies use HackerRank or Codility. Expect 2-3 problems in 90 minutes. The difficulty mix is usually one easy (string manipulation, array iteration) and one medium (BFS/DFS on a grid, sliding window, or hash map problem). Some companies add a third 'hard' question that's intentionally too hard to fully solve — they want to see your approach. Time management is the biggest skill — if you've spent more than 30 minutes on one problem, move on and come back. Test your code with edge cases (empty input, single element, large input). Submissions with passing all hidden tests matter more than elegant code.",
+      "metadata": {
+        "role": "SDE-1",
+        "stage": "online_assessment",
+        "category": "interview_format"
+      }
+    },
+    {
+      "content": "Phone screen tips for backend roles: this is usually 1 coding question in 30-40 minutes plus 5-10 minutes for your questions at the end. The question is typically LeetCode Easy or low Medium — they want to see if you can code at all, not whether you can solve hard problems under pressure. Talk through your approach before coding. Clarify ambiguities upfront — does the array have duplicates? Can input be empty? What should I return for invalid input? Write working code first, then optimize. Common mistakes that fail candidates here: silence (interviewer can't help you if they can't follow your thinking), refusing to use hints, jumping into code without a plan, and not testing your code with examples.",
+      "metadata": {
+        "role": "SDE-1",
+        "stage": "phone_screen",
+        "category": "interview_format"
+      }
+    }
+  ]
+}
