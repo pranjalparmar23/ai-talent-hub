@@ -46,7 +46,7 @@ export default function Register() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900">Create Account</h1>
-          <p className="text-slate-500 mt-2">Join AI Talent Hub</p>
+          <p className="text-slate-500 mt-2">AI Recruitment and Multi - Agent Interview Preparation Platform</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
