@@ -1,10 +1,9 @@
 """ChromaDB vector store wrapper.
 
-Connects to the ChromaDB container and exposes a thin sync API for adding
-documents, querying, and managing collections.
+Connects to the ChromaDB container and exposes a thin async-friendly API
+for adding documents, querying, and managing collections.
 """
 import os
-import uuid
 import logging
 from typing import Optional
 import chromadb
@@ -19,8 +18,6 @@ class VectorStore:
     """Singleton-style wrapper around the ChromaDB HTTP client."""
 
     _client: Optional[chromadb.HttpClient] = None
-
-    # ── Connection ───────────────────────────────────────────
 
     @classmethod
     def get_client(cls) -> chromadb.HttpClient:
@@ -37,13 +34,6 @@ class VectorStore:
         return cls._client
 
     @classmethod
-    def heartbeat(cls) -> int:
-        """Return ChromaDB heartbeat — used by /health endpoint."""
-        return cls.get_client().heartbeat()
-
-    # ── Collection management ────────────────────────────────
-
-    @classmethod
     def get_or_create_collection(cls, spec: CollectionSpec) -> Collection:
         """Get a collection by spec, creating it if it doesn't exist."""
         client = cls.get_client()
@@ -56,19 +46,16 @@ class VectorStore:
         )
 
     @classmethod
-    def get_collection(cls, name: str) -> Collection:
-        """Get an existing collection by name. Raises if it doesn't exist."""
-        return cls.get_client().get_collection(name=name)
-
-    @classmethod
     def list_collections(cls) -> list[str]:
         """Return all collection names currently in ChromaDB."""
-        return [c.name for c in cls.get_client().list_collections()]
+        client = cls.get_client()
+        return [c.name for c in client.list_collections()]
 
     @classmethod
     def delete_collection(cls, name: str) -> None:
         """Delete a collection by name. Used by tests for cleanup."""
-        cls.get_client().delete_collection(name=name)
+        client = cls.get_client()
+        client.delete_collection(name=name)
         logger.info(f"Deleted collection: {name}")
 
     @classmethod
@@ -78,106 +65,15 @@ class VectorStore:
         for spec in COLLECTIONS:
             cls.get_or_create_collection(spec)
             created.append(spec.name)
+            logger.info(f"Ensured collection exists: {spec.name}")
         return created
 
-    # ── Document operations ──────────────────────────────────
-
     @classmethod
-    def add_documents(
-        cls,
-        collection_name: str,
-        documents: list[str],
-        embeddings: list[list[float]],
-        metadatas: Optional[list[dict]] = None,
-        ids: Optional[list[str]] = None,
-    ) -> list[str]:
-        """Add documents with pre-computed embeddings to a collection.
-
-        Args:
-            collection_name: Target collection.
-            documents: The raw text chunks (one per row).
-            embeddings: Pre-computed vectors (one per document, same length).
-            metadatas: Optional metadata dicts (one per document).
-            ids: Optional unique IDs. Auto-generated UUIDs if not provided.
-
-        Returns:
-            The list of IDs used (useful when auto-generated).
-        """
-        if not documents:
-            return []
-        if len(embeddings) != len(documents):
-            raise ValueError(
-                f"Length mismatch: {len(documents)} documents but {len(embeddings)} embeddings"
-            )
-        if metadatas is not None and len(metadatas) != len(documents):
-            raise ValueError(
-                f"Length mismatch: {len(documents)} documents but {len(metadatas)} metadatas"
-            )
-
-        if ids is None:
-            ids = [str(uuid.uuid4()) for _ in documents]
-
-        collection = cls.get_collection(collection_name)
-        collection.add(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
-        logger.info(f"Added {len(documents)} documents to '{collection_name}'")
-        return ids
-
-    @classmethod
-    def query(
-        cls,
-        collection_name: str,
-        query_embedding: list[float],
-        top_k: int = 5,
-        where: Optional[dict] = None,
-    ) -> list[dict]:
-        """Find the top-k most similar documents in a collection.
-
-        Args:
-            collection_name: Collection to search.
-            query_embedding: Pre-computed query vector.
-            top_k: Number of results to return.
-            where: Optional metadata filter, e.g. {"company": "Amazon"}.
-
-        Returns:
-            List of result dicts with keys: id, document, metadata, distance.
-            Sorted by similarity (best match first).
-        """
-        collection = cls.get_collection(collection_name)
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where=where,
-        )
-
-        # Chroma returns lists-of-lists (one entry per query). We only send 1 query,
-        # so unwrap the outer list.
-        ids = results.get("ids", [[]])[0]
-        documents = results.get("documents", [[]])[0]
-        metadatas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-
-        return [
-            {
-                "id": ids[i],
-                "document": documents[i],
-                "metadata": metadatas[i] if metadatas else {},
-                "distance": distances[i] if distances else None,
-            }
-            for i in range(len(ids))
-        ]
-
-    @classmethod
-    def count(cls, collection_name: str) -> int:
-        """Return number of documents in a collection. Useful for monitoring."""
-        return cls.get_collection(collection_name).count()
-
+    def heartbeat(cls) -> int:
+        """Return ChromaDB heartbeat — used by /health endpoint."""
+        return cls.get_client().heartbeat()
 
 # ── Compatibility shim for legacy imports ────────────────────
-def get_vector_store() -> type[VectorStore]:
+def get_vector_store() -> VectorStore:
     """Legacy alias — returns the VectorStore class for backward compatibility."""
     return VectorStore
