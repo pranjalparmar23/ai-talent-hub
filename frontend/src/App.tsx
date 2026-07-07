@@ -6,6 +6,7 @@ import Register from './auth/Register'
 
 // Candidate pages
 import CandidateDashboard from './candidate/Dashboard'
+import AnalysisView from './candidate/AnalysisView' 
 
 // Recruiter pages
 import RecruiterDashboard from './recruiter/Dashboard'
@@ -24,6 +25,12 @@ export default function App() {
       <Route path="/candidate/*" element={
         <PrivateRoute>
           <CandidateDashboard />
+        </PrivateRoute>
+      } />
+
+      <Route path="/candidate/analysis" element={          // ← add this
+        <PrivateRoute>
+          <AnalysisView />
         </PrivateRoute>
       } />
 
