@@ -6,7 +6,7 @@ import json
 
 class QuestionGenerationAgent:
     def __init__(self):
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.4)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.4)
         self.prompt = ChatPromptTemplate.from_template(QUESTION_GEN_PROMPT)
 
     async def generate(self, jd_data: dict, resume_data: dict, skill_gaps: list) -> list:

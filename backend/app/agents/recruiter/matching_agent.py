@@ -6,7 +6,7 @@ import json
 
 class MatchingAgent:
     def __init__(self):
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
         self.prompt = ChatPromptTemplate.from_template(MATCHING_PROMPT)
 
     async def compute_match(self, resume_data: dict, jd_data: dict) -> dict:

@@ -7,7 +7,7 @@ import json
 
 class InterviewAgent:
     def __init__(self):
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.5)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.5)
         self.retriever = RAGRetriever()
 
     async def start_session(self, company: str, role: str) -> dict:
