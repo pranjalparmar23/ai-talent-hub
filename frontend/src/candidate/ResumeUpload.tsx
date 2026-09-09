@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { X, Upload, FileText, Briefcase, Loader2, AlertCircle } from 'lucide-react'
+import { X, Upload, FileText, Loader2, AlertCircle } from 'lucide-react'
 import { candidateAPI } from '../services/api'
 
 type Mode = 'resume' | 'jd'

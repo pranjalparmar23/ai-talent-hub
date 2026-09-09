@@ -1,6 +1,11 @@
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+
+# ── Import your Base so Alembic can see all models ────────────────────────
+from app.database.postgres import Base
+import app.database.models  # noqa: F401 — registers all models on Base.metadata
+
 import os
 import sys
 
@@ -9,10 +14,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
-
-# ── Import your Base so Alembic can see all models ────────────────────────
-from app.database.postgres import Base
-import app.database.models  # noqa: F401 — registers all models on Base.metadata
 
 # ── Alembic Config ────────────────────────────────────────────────────────
 config = context.config

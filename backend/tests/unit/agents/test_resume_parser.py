@@ -6,7 +6,6 @@ Uses mocked LLM responses — no real Groq calls. Tests focus on:
   - Input validation (empty, oversized, whitespace)
   - Fallback dict shape matches the real schema
 """
-from unittest.mock import AsyncMock
 
 import pytest
 

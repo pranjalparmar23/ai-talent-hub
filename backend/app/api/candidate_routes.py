@@ -4,7 +4,7 @@ All routes require JWT auth via get_current_user (returns dict with id/email/rol
 Route handlers stay thin — they validate input, load DB rows, delegate to services
 or graphs, and return typed responses.
 """
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
 from app.database.schemas import (
     ATSScoreResponse,
