@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { X, Upload, FileText, Loader2, AlertCircle } from 'lucide-react'
 import { candidateAPI } from '../services/api'
+import axios from 'axios'
 
 type Mode = 'resume' | 'jd'
 
@@ -109,9 +110,9 @@ function ResumeUploader({ onSuccess }: { onSuccess: () => void }) {
         toast.success('Resume added to your workspace')
       }
       onSuccess()
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || 'Upload failed'
-      toast.error(detail)
+    } catch (err: unknown) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
+      toast.error(typeof detail === 'string' ? detail : 'Upload failed')
     } finally {
       setUploading(false)
     }
@@ -235,8 +236,8 @@ function JDComposer({ onSuccess }: { onSuccess: () => void }) {
         toast.success('Target role added')
       }
       onSuccess()
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail
+    } catch (err: unknown) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
       toast.error(
         typeof detail === 'string' ? detail : "Couldn't save this role",
       )

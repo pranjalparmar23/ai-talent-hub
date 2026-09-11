@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import axios from 'axios'
 import { authAPI } from '../services/api'
 import toast from 'react-hot-toast'
 import { Loader2, LogIn } from 'lucide-react'
@@ -26,14 +27,14 @@ export default function Login() {
       localStorage.setItem('refresh_token', refresh_token)
 
       // Decode role from JWT payload (base64) to route correctly
-      const payload = JSON.parse(atob(access_token.split('.')[1]))
-      const role = await fetchUserRole(payload.sub)
+      JSON.parse(atob(access_token.split('.')[1]))
+      const role = fetchUserRole()
 
       toast.success('Welcome back!')
       navigate(role === 'recruiter' ? '/recruiter' : '/candidate')
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      toast.error(detail || 'Login failed. Check your email and password.')
+    } catch (err: unknown) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
+      toast.error(typeof detail === 'string' ? detail : 'Login failed. Check your email and password.')
     } finally {
       setLoading(false)
     }
@@ -41,7 +42,7 @@ export default function Login() {
 
   // Backend doesn't return role in token yet; ask the user or default to candidate.
   // For now we just default to candidate dashboard and let the route system handle it.
-  const fetchUserRole = async (_userId: string): Promise<string> => {
+  const fetchUserRole = (): string => {
     return localStorage.getItem('user_role') || 'candidate'
   }
 

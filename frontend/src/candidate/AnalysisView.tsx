@@ -16,6 +16,7 @@ import {
   type SkillGapResponse,
   type LearningPlanResponse,
 } from '../services/api'
+import axios from 'axios'
 
 type Section = 'ats' | 'gap' | 'plan'
 
@@ -42,6 +43,7 @@ export default function AnalysisView() {
     }
     // Kick off ATS first since it's the "hero" number
     void loadSection('ats')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumeId, jdId])
 
   async function loadSection(section: Section) {
@@ -58,9 +60,9 @@ export default function AnalysisView() {
         const res = await candidateAPI.getLearningPlan(resumeId, jdId)
         setPlan(res.data)
       }
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || 'Analysis failed'
-      toast.error(detail)
+    } catch (err: unknown) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
+      toast.error(typeof detail === 'string' ? detail : 'Analysis failed')
     } finally {
       setLoading((s) => ({ ...s, [section]: false }))
     }
