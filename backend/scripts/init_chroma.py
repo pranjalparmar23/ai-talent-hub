@@ -46,7 +46,7 @@ def main() -> int:
         VectorStore.get_or_create_collection(spec)
         print(f"   ✅ {spec.name:30s}  ({spec.description})")
 
-    print(f"\n📋 Collections currently in ChromaDB:")
+    print("\n📋 Collections currently in ChromaDB:")
     for name in VectorStore.list_collections():
         marker = "✓" if name in [c.name for c in COLLECTIONS] else "?"
         print(f"   {marker} {name}")
