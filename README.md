@@ -375,18 +375,6 @@ Interactive docs at `http://localhost:8000/api/docs` (Swagger UI) and `/api/redo
 
 All agents share one Groq client — no OpenAI key needed:
 
-```python
-# app/llm/models.py
-from langchain_groq import ChatGroq
-
-def get_groq_llm(temperature: float = 0):
-    return ChatGroq(
-        model="llama-3.3-70b-versatile",
-        temperature=temperature,
-        groq_api_key=os.getenv("GROQ_API_KEY")
-    )
-```
-
 ---
 
 ## RAG Pipeline
