@@ -6,7 +6,7 @@ import json
 
 class EvaluationAgent:
     def __init__(self):
-        self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+        self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
         self.prompt = ChatPromptTemplate.from_template(EVALUATION_PROMPT)
 
     async def evaluate_interview(self, conversation_history: list) -> dict:

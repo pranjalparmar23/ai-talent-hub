@@ -28,7 +28,7 @@ export default function App() {
         </PrivateRoute>
       } />
 
-      <Route path="/candidate/analysis" element={          // ← add this
+      <Route path="/candidate/analysis" element={          
         <PrivateRoute>
           <AnalysisView />
         </PrivateRoute>

@@ -6,6 +6,15 @@ Run this once after starting the ChromaDB container:
 
 Safe to re-run — uses get_or_create semantics.
 """
+
+# ── Silence ChromaDB PostHog telemetry (must be BEFORE any other imports) ──
+try:
+    import posthog
+    posthog.capture = lambda *args, **kwargs: None
+    posthog.Posthog.capture = lambda *args, **kwargs: None
+except ImportError:
+    pass
+
 import sys
 import os
 
@@ -29,7 +38,7 @@ def main() -> int:
         print(f"❌ Cannot reach ChromaDB: {e}")
         print(f"   Check CHROMA_HOST/CHROMA_PORT in .env (currently "
               f"{os.getenv('CHROMA_HOST', 'localhost')}:{os.getenv('CHROMA_PORT', '8001')})")
-        print(f"   Is the container running?  docker compose ps chromadb")
+        print("   Is the container running?  docker compose ps chromadb")
         return 1
 
     print(f"\n📦 Initializing {len(COLLECTIONS)} collections…")

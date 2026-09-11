@@ -34,7 +34,7 @@ export default function CandidateDashboard() {
       ])
       setResumes(resumesRes.data)
       setJds(jdsRes.data)
-    } catch (err) {
+    } catch {
       toast.error("Couldn't load your workspace")
     } finally {
       setLoading(false)

@@ -74,7 +74,7 @@ jobs:
           ACCESS_TOKEN_EXPIRE_MINUTES: "30"
           REFRESH_TOKEN_EXPIRE_DAYS: "7"
           GROQ_API_KEY: dummy-for-mocked-tests
-          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_MODEL: openai/gpt-oss-120b
 
           LANGCHAIN_TRACING_V2: "false"
           ALLOWED_ORIGINS: http://localhost:5173

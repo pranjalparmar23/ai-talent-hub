@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { authAPI } from '../services/api'
 import toast from 'react-hot-toast'
 import { Loader2, UserPlus, Briefcase, GraduationCap } from 'lucide-react'
+import axios from 'axios'
 
 type Role = 'candidate' | 'recruiter'
 
@@ -28,13 +29,13 @@ export default function Register() {
       localStorage.setItem('user_role', role)
       toast.success('Account created! Please sign in.')
       navigate('/login')
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail
+    } catch (err: unknown) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : undefined
       if (Array.isArray(detail)) {
         // Pydantic validation error array
         toast.error(detail[0]?.msg || 'Invalid input')
       } else {
-        toast.error(detail || 'Registration failed')
+        toast.error(typeof detail === 'string' ? detail : 'Registration failed')
       }
     } finally {
       setLoading(false)
