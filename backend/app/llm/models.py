@@ -7,7 +7,7 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
-DEFAULT_MODEL = ""
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
 def get_llm(temperature: float = 0, model: str | None = None) -> ChatGroq:
