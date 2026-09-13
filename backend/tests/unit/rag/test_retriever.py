@@ -1,6 +1,6 @@
-import pytest
 from unittest.mock import patch
 from app.rag.retriever import RAGRetriever
+
 
 def test_retrieve_returns_list():
     retriever = RAGRetriever()
