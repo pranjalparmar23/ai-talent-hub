@@ -15,6 +15,7 @@ from tests.unit.agents._fakes import FakeChain, FakeMsg
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def agent():
     return ResumeParserAgent()
@@ -23,7 +24,7 @@ def agent():
 @pytest.fixture
 def valid_llm_response():
     """A realistic LLM response — clean JSON, all fields present."""
-    return '''
+    return """
     {
         "name": "Aarav Mehta",
         "email": "aarav@example.com",
@@ -57,7 +58,7 @@ def valid_llm_response():
         "projects": [],
         "certifications": []
     }
-    '''
+    """
 
 
 @pytest.fixture
@@ -66,8 +67,8 @@ def markdown_wrapped_response(valid_llm_response):
     return f"```json\n{valid_llm_response}\n```"
 
 
-
 # ── Happy path ────────────────────────────────────────────────────────
+
 
 class TestHappyPath:
     @pytest.mark.asyncio
@@ -94,9 +95,9 @@ class TestHappyPath:
     async def test_parses_preamble_and_postamble(self, agent):
         """LLM sometimes adds 'Here you go:' before and 'Hope this helps!' after."""
         content = (
-            'Sure! Here is the parsed resume: '
+            "Sure! Here is the parsed resume: "
             '{"name": "Test", "skills": ["Python"], "experience_years": 2} '
-            '— hope this helps!'
+            "— hope this helps!"
         )
         agent.chain = FakeChain(response=FakeMsg(content))
         result = await agent.parse("Some resume text")
@@ -106,6 +107,7 @@ class TestHappyPath:
 
 
 # ── Fallback / degradation ────────────────────────────────────────────
+
 
 class TestFallback:
     @pytest.mark.asyncio
@@ -149,6 +151,7 @@ class TestFallback:
 
 # ── Input handling ────────────────────────────────────────────────────
 
+
 class TestInputHandling:
     @pytest.mark.asyncio
     async def test_truncates_oversized_input(self, agent, valid_llm_response):
@@ -166,6 +169,7 @@ class TestInputHandling:
 
 # ── Fallback dict shape ───────────────────────────────────────────────
 
+
 class TestFallbackShape:
     @pytest.mark.asyncio
     async def test_fallback_matches_real_schema(self, agent):
@@ -173,9 +177,19 @@ class TestFallbackShape:
         result = await agent.parse("")
 
         required_keys = {
-            "name", "email", "phone", "location", "linkedin", "github",
-            "summary", "skills", "experience_years", "experience",
-            "education", "projects", "certifications",
+            "name",
+            "email",
+            "phone",
+            "location",
+            "linkedin",
+            "github",
+            "summary",
+            "skills",
+            "experience_years",
+            "experience",
+            "education",
+            "projects",
+            "certifications",
         }
         assert required_keys.issubset(result.keys())
 

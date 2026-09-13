@@ -3,6 +3,7 @@
 Single source of truth for which vector collections the platform uses.
 Adding a new RAG namespace? Add it here and run `python scripts/init_chroma.py`.
 """
+
 from dataclasses import dataclass
 
 

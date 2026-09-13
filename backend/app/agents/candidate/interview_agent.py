@@ -17,18 +17,24 @@ class InterviewAgent:
         )
         prompt = ChatPromptTemplate.from_template(INTERVIEW_PROMPT)
         chain = prompt | self.llm
-        response = await chain.ainvoke({
-            "company": company,
-            "role": role,
-            "experiences": json.dumps(experiences),
-        })
+        response = await chain.ainvoke(
+            {
+                "company": company,
+                "role": role,
+                "experiences": json.dumps(experiences),
+            }
+        )
         return {"question": response.content, "session_started": True}
 
-    async def followup(self, conversation_history: list, candidate_response: str) -> str:
+    async def followup(
+        self, conversation_history: list, candidate_response: str
+    ) -> str:
         prompt = ChatPromptTemplate.from_template(FOLLOWUP_PROMPT)
         chain = prompt | self.llm
-        response = await chain.ainvoke({
-            "history": json.dumps(conversation_history),
-            "candidate_response": candidate_response,
-        })
+        response = await chain.ainvoke(
+            {
+                "history": json.dumps(conversation_history),
+                "candidate_response": candidate_response,
+            }
+        )
         return response.content

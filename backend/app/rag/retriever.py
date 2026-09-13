@@ -1,4 +1,5 @@
 """RAGRetriever — the public API for semantic search over ChromaDB collections."""
+
 import logging
 from dataclasses import dataclass, field
 from typing import Any

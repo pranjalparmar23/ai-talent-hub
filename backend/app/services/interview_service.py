@@ -15,7 +15,9 @@ class InterviewService:
         session_id = str(uuid.uuid4())
         result = await self.interviewer.start_session(company, role)
         async with AsyncSessionLocal() as db:
-            session = InterviewSession(id=session_id, user_id=user_id, company=company, role=role, history=[])
+            session = InterviewSession(
+                id=session_id, user_id=user_id, company=company, role=role, history=[]
+            )
             db.add(session)
             await db.commit()
         memory = MemoryAgent(session_id)

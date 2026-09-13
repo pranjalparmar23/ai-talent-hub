@@ -6,6 +6,7 @@ Roadmap has the most complex output (nested weeks + resources). Tests focus on:
   - Malformed weeks are cleaned up by _normalize
   - Edge case: no skill gaps = no LLM call, empty plan
 """
+
 from unittest.mock import patch
 
 import pytest
@@ -47,7 +48,7 @@ def sample_docs():
 
 @pytest.fixture
 def full_llm_response():
-    return '''
+    return """
     {
         "target_role": "Senior Backend Engineer",
         "total_weeks": 4,
@@ -71,10 +72,11 @@ def full_llm_response():
         ],
         "summary": "4-week plan covering K8s and AWS fundamentals."
     }
-    '''
+    """
 
 
 # ── Happy path ────────────────────────────────────────────────────────
+
 
 class TestHappyPath:
     @pytest.mark.asyncio
@@ -97,10 +99,15 @@ class TestHappyPath:
 
 # ── RAG integration ──────────────────────────────────────────────────
 
+
 class TestRAGIntegration:
     @pytest.mark.asyncio
-    async def test_retrieval_called_once_per_skill(self, agent, sample_docs, full_llm_response):
-        with patch.object(agent.retriever, "retrieve", return_value=sample_docs) as mock_retrieve:
+    async def test_retrieval_called_once_per_skill(
+        self, agent, sample_docs, full_llm_response
+    ):
+        with patch.object(
+            agent.retriever, "retrieve", return_value=sample_docs
+        ) as mock_retrieve:
             agent.chain = FakeChain(response=FakeMsg(full_llm_response))
             await agent.generate(
                 skill_gaps=["Kubernetes", "AWS", "Terraform"],
@@ -129,13 +136,18 @@ class TestRAGIntegration:
 
         # LLM should have been called with an empty resources list
         import json
+
         called_resources = json.loads(fake.calls[0]["resources"])
         assert called_resources == []
 
     @pytest.mark.asyncio
-    async def test_retrieval_failure_degrades_gracefully(self, agent, full_llm_response):
+    async def test_retrieval_failure_degrades_gracefully(
+        self, agent, full_llm_response
+    ):
         """ChromaDB down should not crash the roadmap generation."""
-        with patch.object(agent.retriever, "retrieve", side_effect=Exception("ChromaDB down")):
+        with patch.object(
+            agent.retriever, "retrieve", side_effect=Exception("ChromaDB down")
+        ):
             agent.chain = FakeChain(response=FakeMsg(full_llm_response))
 
             result = await agent.generate(
@@ -150,6 +162,7 @@ class TestRAGIntegration:
 
 # ── Edge cases ───────────────────────────────────────────────────────
 
+
 class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_no_skill_gaps_returns_empty_plan_no_llm(self, agent):
@@ -161,22 +174,27 @@ class TestEdgeCases:
         assert "No skill gaps" in result["summary"]
 
     @pytest.mark.asyncio
-    async def test_empty_target_role_gets_default(self, agent, sample_docs, full_llm_response):
+    async def test_empty_target_role_gets_default(
+        self, agent, sample_docs, full_llm_response
+    ):
         with patch.object(agent.retriever, "retrieve", return_value=sample_docs):
             agent.chain = FakeChain(response=FakeMsg(full_llm_response))
             result = await agent.generate(skill_gaps=["Python"], target_role="")
 
         # Should not crash — default fills in
-        assert result.get("target_role") == "target role"  # fallback when input is empty
+        assert (
+            result.get("target_role") == "target role"
+        )  # fallback when input is empty
 
 
 # ── Normalization ────────────────────────────────────────────────────
+
 
 class TestNormalization:
     @pytest.mark.asyncio
     async def test_malformed_weeks_cleaned(self, agent, sample_docs):
         """LLM sometimes returns weeks with missing fields."""
-        messy = '''
+        messy = """
         {
             "target_role": "Backend",
             "total_weeks": 2,
@@ -186,7 +204,7 @@ class TestNormalization:
             ],
             "summary": "Plan"
         }
-        '''
+        """
         with patch.object(agent.retriever, "retrieve", return_value=sample_docs):
             agent.chain = FakeChain(response=FakeMsg(messy))
             result = await agent.generate(skill_gaps=["K8s"], target_role="Backend")
@@ -206,6 +224,7 @@ class TestNormalization:
 
 
 # ── Fallback ─────────────────────────────────────────────────────────
+
 
 class TestFallback:
     @pytest.mark.asyncio

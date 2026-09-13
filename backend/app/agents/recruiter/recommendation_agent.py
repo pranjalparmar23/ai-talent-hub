@@ -9,11 +9,15 @@ class HiringRecommendationAgent:
         self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
         self.prompt = ChatPromptTemplate.from_template(RECOMMENDATION_PROMPT)
 
-    async def recommend(self, candidate_data: dict, match_score: float, interview_score: float) -> dict:
+    async def recommend(
+        self, candidate_data: dict, match_score: float, interview_score: float
+    ) -> dict:
         chain = self.prompt | self.llm
-        response = await chain.ainvoke({
-            "candidate": json.dumps(candidate_data),
-            "match_score": match_score,
-            "interview_score": interview_score,
-        })
+        response = await chain.ainvoke(
+            {
+                "candidate": json.dumps(candidate_data),
+                "match_score": match_score,
+                "interview_score": interview_score,
+            }
+        )
         return json.loads(response.content)

@@ -11,8 +11,10 @@ class MatchingAgent:
 
     async def compute_match(self, resume_data: dict, jd_data: dict) -> dict:
         chain = self.prompt | self.llm
-        response = await chain.ainvoke({
-            "resume": json.dumps(resume_data),
-            "jd": json.dumps(jd_data),
-        })
+        response = await chain.ainvoke(
+            {
+                "resume": json.dumps(resume_data),
+                "jd": json.dumps(jd_data),
+            }
+        )
         return json.loads(response.content)

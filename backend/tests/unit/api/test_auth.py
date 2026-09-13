@@ -12,7 +12,11 @@ def _unique_email(prefix: str = "user") -> str:
 async def test_register_new_user(client: AsyncClient):
     response = await client.post(
         "/api/auth/register",
-        json={"email": _unique_email("new"), "password": "SecurePass123", "role": "candidate"},
+        json={
+            "email": _unique_email("new"),
+            "password": "SecurePass123",
+            "role": "candidate",
+        },
     )
     assert response.status_code == 201
     data = response.json()
@@ -37,7 +41,11 @@ async def test_register_duplicate_email(client: AsyncClient):
 async def test_register_invalid_role(client: AsyncClient):
     response = await client.post(
         "/api/auth/register",
-        json={"email": _unique_email("role"), "password": "SecurePass123", "role": "superadmin"},
+        json={
+            "email": _unique_email("role"),
+            "password": "SecurePass123",
+            "role": "superadmin",
+        },
     )
     assert response.status_code == 422
 

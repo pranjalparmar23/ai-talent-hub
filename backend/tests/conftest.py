@@ -16,7 +16,9 @@ TEST_DATABASE_URL = os.getenv(
 )
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
-TestSessionLocal = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+TestSessionLocal = sessionmaker(
+    test_engine, class_=AsyncSession, expire_on_commit=False
+)
 
 
 async def override_get_db():
@@ -63,6 +65,7 @@ async def client():
 
 # ── Reusable test data fixtures ──────────────────────────────
 
+
 @pytest.fixture
 def user_payload():
     return {
@@ -89,7 +92,10 @@ def sample_resume_data():
         "skills": ["Python", "FastAPI", "Docker", "PostgreSQL"],
         "experience_years": 3,
         "projects": [
-            {"name": "AI Talent Hub", "description": "Full-stack AI recruitment platform"}
+            {
+                "name": "AI Talent Hub",
+                "description": "Full-stack AI recruitment platform",
+            }
         ],
     }
 

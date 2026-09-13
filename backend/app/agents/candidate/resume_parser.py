@@ -1,4 +1,5 @@
 """ResumeParserAgent — extracts structured JSON from raw resume text using Groq."""
+
 import logging
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -55,7 +56,11 @@ class ResumeParserAgent:
         """
         if not raw_text or not raw_text.strip():
             logger.warning("ResumeParserAgent called with empty text")
-            return {**_PARSE_FALLBACK, "_parse_error": True, "_error_reason": "empty_input"}
+            return {
+                **_PARSE_FALLBACK,
+                "_parse_error": True,
+                "_error_reason": "empty_input",
+            }
 
         # Guardrail — if the PDF has a huge amount of text (>50k chars), truncate.
         # Real resumes are typically <10k chars. Anything larger is scanned OCR noise
@@ -68,9 +73,17 @@ class ResumeParserAgent:
             response = await self.chain.ainvoke({"resume_text": raw_text})
         except Exception as e:
             logger.exception("Groq call failed in ResumeParserAgent")
-            return {**_PARSE_FALLBACK, "_parse_error": True, "_error_reason": str(e)[:200]}
+            return {
+                **_PARSE_FALLBACK,
+                "_parse_error": True,
+                "_error_reason": str(e)[:200],
+            }
 
         return parse_llm_json(
             response.content,
-            fallback={**_PARSE_FALLBACK, "_parse_error": True, "_raw_output": response.content[:500]},
+            fallback={
+                **_PARSE_FALLBACK,
+                "_parse_error": True,
+                "_raw_output": response.content[:500],
+            },
         )

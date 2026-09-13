@@ -3,6 +3,7 @@
 Used by both candidate flow (candidate uploads a target JD to compare against)
 and recruiter flow (Phase 5, recruiter uploads a JD to rank candidates).
 """
+
 import logging
 import re
 
@@ -81,8 +82,12 @@ class JDAnalyzerAgent:
         is consistent (lowercased, trimmed, deduplicated) so the frontend can
         display it and the ATS scorer can compare it.
         """
-        parsed["skills_required"] = self._clean_string_list(parsed.get("skills_required"))
-        parsed["skills_preferred"] = self._clean_string_list(parsed.get("skills_preferred"))
+        parsed["skills_required"] = self._clean_string_list(
+            parsed.get("skills_required")
+        )
+        parsed["skills_preferred"] = self._clean_string_list(
+            parsed.get("skills_preferred")
+        )
         parsed["responsibilities"] = self._clean_string_list(
             parsed.get("responsibilities"), preserve_case=True
         )

@@ -6,7 +6,9 @@ from sqlalchemy import select
 from app.database.postgres import AsyncSessionLocal
 from app.database.models import User
 
-SECRET_KEY = os.getenv("SECRET_KEY", "0a6389904da316b26f94c2487af5e6a082e5f7aaa50c00710711c7ebc0e6f52d")
+SECRET_KEY = os.getenv(
+    "SECRET_KEY", "0a6389904da316b26f94c2487af5e6a082e5f7aaa50c00710711c7ebc0e6f52d"
+)
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -37,6 +39,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 
 def require_role(role: str):
     """Dependency factory: returns a dependency that only allows the given role."""
+
     async def _check(current_user: dict = Depends(get_current_user)) -> dict:
         if current_user.get("role") != role:
             raise HTTPException(
@@ -44,4 +47,5 @@ def require_role(role: str):
                 detail=f"Requires role: {role}",
             )
         return current_user
+
     return _check

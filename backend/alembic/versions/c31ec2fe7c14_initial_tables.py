@@ -5,6 +5,7 @@ Revises:
 Create Date: 2026-06-07 16:08:59.292686
 
 """
+
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
@@ -25,7 +26,9 @@ def upgrade() -> None:
         sa.Column("email", sa.String(), nullable=False),
         sa.Column("hashed_password", sa.String(), nullable=False),
         sa.Column("role", sa.String(), nullable=False, server_default="candidate"),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_users_email", "users", ["email"], unique=True)
 
@@ -42,7 +45,9 @@ def upgrade() -> None:
         sa.Column("blob_url", sa.String()),
         sa.Column("parsed_data", postgresql.JSON()),
         sa.Column("ats_score", sa.Integer()),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_resumes_user_id", "resumes", ["user_id"])
 
@@ -59,9 +64,13 @@ def upgrade() -> None:
         sa.Column("title", sa.String()),
         sa.Column("raw_text", sa.Text()),
         sa.Column("parsed_data", postgresql.JSON()),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
     )
-    op.create_index("ix_job_descriptions_recruiter_id", "job_descriptions", ["recruiter_id"])
+    op.create_index(
+        "ix_job_descriptions_recruiter_id", "job_descriptions", ["recruiter_id"]
+    )
 
     # ── interview_sessions ──────────────────────────────────
     op.create_table(
@@ -77,7 +86,9 @@ def upgrade() -> None:
         sa.Column("role", sa.String()),
         sa.Column("history", postgresql.JSON(), server_default="[]"),
         sa.Column("feedback", postgresql.JSON()),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_interview_sessions_user_id", "interview_sessions", ["user_id"])
 

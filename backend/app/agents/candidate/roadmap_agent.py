@@ -6,6 +6,7 @@ This is the first agent that combines LLM + RAG. Flow:
   3. Pass gaps + role + retrieved resources to Groq
   4. Return a structured weekly plan grounded in the retrieved resources
 """
+
 import json
 import logging
 from typing import Any
@@ -49,7 +50,7 @@ class RoadmapAgent:
 
     def __init__(self):
         # Slight temperature for variety — same input twice shouldn't give identical plans
-        self.llm = get_llm(temperature=0.3)
+        self.llm = get_llm(temperature=0.3, max_tokens=4096)
         self.prompt = ChatPromptTemplate.from_template(ROADMAP_PROMPT)
         self.chain = self.prompt | self.llm
         self.retriever = RAGRetriever()
@@ -84,19 +85,29 @@ class RoadmapAgent:
 
         # Retrieve resources per skill, dedupe, filter by similarity
         resources = self._retrieve_resources(skill_gaps)
-        logger.info(f"RoadmapAgent retrieved {len(resources)} resources for {len(skill_gaps)} gaps")
+        logger.info(
+            f"RoadmapAgent retrieved {len(resources)} resources for {len(skill_gaps)} gaps"
+        )
 
         try:
-            response = await self.chain.ainvoke({
-                "skill_gaps": json.dumps(skill_gaps, ensure_ascii=False),
-                "target_role": target_role,
-                "resources": json.dumps(resources, ensure_ascii=False),
-            })
+            response = await self.chain.ainvoke(
+                {
+                    "skill_gaps": json.dumps(skill_gaps, ensure_ascii=False),
+                    "target_role": target_role,
+                    "resources": json.dumps(resources, ensure_ascii=False),
+                }
+            )
         except Exception as e:
             logger.exception("Groq call failed in RoadmapAgent")
-            return {**_ROADMAP_FALLBACK, "target_role": target_role, "_error_reason": str(e)[:200]}
+            return {
+                **_ROADMAP_FALLBACK,
+                "target_role": target_role,
+                "_error_reason": str(e)[:200],
+            }
 
-        parsed = parse_llm_json(response.content, fallback={**_ROADMAP_FALLBACK, "target_role": target_role})
+        parsed = parse_llm_json(
+            response.content, fallback={**_ROADMAP_FALLBACK, "target_role": target_role}
+        )
         return self._normalize(parsed, target_role=target_role)
 
     # ── RAG retrieval ────────────────────────────────────────────────────
@@ -125,12 +136,16 @@ class RoadmapAgent:
                 if doc.similarity < SIMILARITY_THRESHOLD:
                     continue
                 seen_ids.add(doc.id)
-                all_chunks.append({
-                    "content": doc.document[:500],  # cap chunk size for prompt budget
-                    "metadata": doc.metadata,
-                    "similarity": round(doc.similarity, 3),
-                    "matched_skill": skill,
-                })
+                all_chunks.append(
+                    {
+                        "content": doc.document[
+                            :500
+                        ],  # cap chunk size for prompt budget
+                        "metadata": doc.metadata,
+                        "similarity": round(doc.similarity, 3),
+                        "matched_skill": skill,
+                    }
+                )
 
             if len(all_chunks) >= MAX_TOTAL_RESOURCES:
                 break
@@ -159,17 +174,22 @@ class RoadmapAgent:
         for i, w in enumerate(weeks, start=1):
             if not isinstance(w, dict):
                 continue
-            clean_weeks.append({
-                "week": int(w.get("week", i)) if str(w.get("week", "")).isdigit() else i,
-                "topic": str(w.get("topic", "") or "").strip() or f"Week {i}",
-                "goal": str(w.get("goal", "") or "").strip() or None,
-                "tasks": [
-                    t.strip() for t in (w.get("tasks") or [])
-                    if isinstance(t, str) and t.strip()
-                ],
-                "resources": self._clean_week_resources(w.get("resources")),
-                "estimated_hours": self._coerce_hours(w.get("estimated_hours")),
-            })
+            clean_weeks.append(
+                {
+                    "week": (
+                        int(w.get("week", i)) if str(w.get("week", "")).isdigit() else i
+                    ),
+                    "topic": str(w.get("topic", "") or "").strip() or f"Week {i}",
+                    "goal": str(w.get("goal", "") or "").strip() or None,
+                    "tasks": [
+                        t.strip()
+                        for t in (w.get("tasks") or [])
+                        if isinstance(t, str) and t.strip()
+                    ],
+                    "resources": self._clean_week_resources(w.get("resources")),
+                    "estimated_hours": self._coerce_hours(w.get("estimated_hours")),
+                }
+            )
 
         total_weeks = len(clean_weeks)
 
@@ -197,11 +217,14 @@ class RoadmapAgent:
         for r in value:
             if not isinstance(r, dict):
                 continue
-            cleaned.append({
-                "title": str(r.get("title", "") or "").strip() or "Untitled resource",
-                "source": str(r.get("source", "") or "").strip() or None,
-                "type": str(r.get("type", "") or "").strip().lower() or "resource",
-            })
+            cleaned.append(
+                {
+                    "title": str(r.get("title", "") or "").strip()
+                    or "Untitled resource",
+                    "source": str(r.get("source", "") or "").strip() or None,
+                    "type": str(r.get("type", "") or "").strip().lower() or "resource",
+                }
+            )
         return cleaned
 
     @staticmethod

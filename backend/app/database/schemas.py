@@ -1,4 +1,5 @@
 """Pydantic request/response schemas — one source of truth for API shapes."""
+
 from datetime import datetime
 from typing import Any, List, Optional
 import uuid
@@ -9,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 # ═════════════════════════════════════════════════════════════════════════════
 # AUTH
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -58,6 +60,7 @@ class RefreshTokenRequest(BaseModel):
 # RESUME
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 class ExperienceItem(BaseModel):
     company: Optional[str] = None
     role: Optional[str] = None
@@ -85,6 +88,7 @@ class ProjectItem(BaseModel):
 
 class ParsedResume(BaseModel):
     """The structured JSON we extract from a resume PDF."""
+
     name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -115,6 +119,7 @@ class ResumeUploadResponse(BaseModel):
 
 class ResumeSummary(BaseModel):
     """Used in list views — trimmed to essentials."""
+
     resume_id: str
     name: str
     ats_score: Optional[int] = None
@@ -133,18 +138,23 @@ class ResumeDetail(BaseModel):
 # JOB DESCRIPTION
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 class JDCreateRequest(BaseModel):
     """Body for POST /api/candidate/jd — user pastes text or provides title + text."""
+
     title: str = Field(..., min_length=1, max_length=200)
     raw_text: str = Field(..., min_length=20)
 
 
 class ParsedJD(BaseModel):
     """Structured JSON we extract from a JD."""
+
     title: Optional[str] = None
     company: Optional[str] = None
     location: Optional[str] = None
-    role_level: Optional[str] = None  # "junior" | "mid" | "senior" | "lead" | "principal"
+    role_level: Optional[str] = (
+        None  # "junior" | "mid" | "senior" | "lead" | "principal"
+    )
     employment_type: Optional[str] = None  # "full-time" | "contract" | "internship"
     experience_years_min: Optional[int] = None
     skills_required: List[str] = Field(default_factory=list)
@@ -172,6 +182,7 @@ class JDSummary(BaseModel):
 # ═════════════════════════════════════════════════════════════════════════════
 # ATS SCORE / SKILL GAP / ROADMAP
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class ATSScoreResponse(BaseModel):
     resume_id: str
@@ -212,6 +223,7 @@ class LearningPlanResponse(BaseModel):
 # INTERVIEW (Phase 4 — placeholders that let routes typecheck now)
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 class InterviewStartRequest(BaseModel):
     company: str
     role: str
@@ -242,6 +254,7 @@ class InterviewFeedbackResponse(BaseModel):
 # RECRUITER (Phase 5 — placeholders)
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 class CandidateRankingItem(BaseModel):
     candidate_id: str
     name: str
@@ -258,6 +271,7 @@ class CandidateRankingResponse(BaseModel):
 # ═════════════════════════════════════════════════════════════════════════════
 # GENERIC
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 class MessageResponse(BaseModel):
     message: str

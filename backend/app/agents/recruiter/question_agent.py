@@ -9,11 +9,15 @@ class QuestionGenerationAgent:
         self.llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.4)
         self.prompt = ChatPromptTemplate.from_template(QUESTION_GEN_PROMPT)
 
-    async def generate(self, jd_data: dict, resume_data: dict, skill_gaps: list) -> list:
+    async def generate(
+        self, jd_data: dict, resume_data: dict, skill_gaps: list
+    ) -> list:
         chain = self.prompt | self.llm
-        response = await chain.ainvoke({
-            "jd": json.dumps(jd_data),
-            "resume": json.dumps(resume_data),
-            "skill_gaps": json.dumps(skill_gaps),
-        })
+        response = await chain.ainvoke(
+            {
+                "jd": json.dumps(jd_data),
+                "resume": json.dumps(resume_data),
+                "skill_gaps": json.dumps(skill_gaps),
+            }
+        )
         return json.loads(response.content)

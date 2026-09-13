@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
 # ── Alembic Config ────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
 
 # ── Use asyncpg URL → swap to psycopg2 for Alembic (sync driver) ─────────
 def get_url():

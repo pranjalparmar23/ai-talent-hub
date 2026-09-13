@@ -22,12 +22,16 @@ async def rank_candidates(jd_id: str, current_user=Depends(get_current_user)):
 
 
 @router.get("/jd/{jd_id}/questions/{candidate_id}")
-async def get_interview_questions(jd_id: str, candidate_id: str, current_user=Depends(get_current_user)):
+async def get_interview_questions(
+    jd_id: str, candidate_id: str, current_user=Depends(get_current_user)
+):
     graph = RecruiterGraph()
     return await graph.generate_questions(jd_id, candidate_id)
 
 
 @router.get("/jd/{jd_id}/recommendation/{candidate_id}")
-async def get_hiring_recommendation(jd_id: str, candidate_id: str, current_user=Depends(get_current_user)):
+async def get_hiring_recommendation(
+    jd_id: str, candidate_id: str, current_user=Depends(get_current_user)
+):
     graph = RecruiterGraph()
     return await graph.get_recommendation(jd_id, candidate_id)

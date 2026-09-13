@@ -1,4 +1,5 @@
 """ATSAgent — scores a resume against a job description using Groq."""
+
 import json
 import logging
 from typing import Any
@@ -59,10 +60,12 @@ class ATSAgent:
         trimmed_jd = self._trim_jd_for_scoring(jd_data)
 
         try:
-            response = await self.chain.ainvoke({
-                "resume": json.dumps(trimmed_resume, ensure_ascii=False),
-                "job_description": json.dumps(trimmed_jd, ensure_ascii=False),
-            })
+            response = await self.chain.ainvoke(
+                {
+                    "resume": json.dumps(trimmed_resume, ensure_ascii=False),
+                    "job_description": json.dumps(trimmed_jd, ensure_ascii=False),
+                }
+            )
         except Exception as e:
             logger.exception("Groq call failed in ATSAgent")
             return {**_ATS_FALLBACK, "_error_reason": str(e)[:200]}
@@ -78,7 +81,12 @@ class ATSAgent:
         parsed["ats_score"] = max(0, min(100, score))
 
         # Ensure list fields are actually lists (LLMs sometimes return strings)
-        for key in ("matching_keywords", "missing_keywords", "formatting_issues", "recommendations"):
+        for key in (
+            "matching_keywords",
+            "missing_keywords",
+            "formatting_issues",
+            "recommendations",
+        ):
             if not isinstance(parsed.get(key), list):
                 parsed[key] = []
 
@@ -92,7 +100,11 @@ class ATSAgent:
             "skills": resume.get("skills", []),
             "experience_years": resume.get("experience_years", 0),
             "experience": [
-                {"role": e.get("role"), "company": e.get("company"), "highlights": e.get("highlights", [])[:3]}
+                {
+                    "role": e.get("role"),
+                    "company": e.get("company"),
+                    "highlights": e.get("highlights", [])[:3],
+                }
                 for e in resume.get("experience", [])[:5]  # cap to 5 most recent
             ],
             "education": resume.get("education", []),

@@ -14,7 +14,9 @@ class User(Base):
     role = Column(String, nullable=False, default="candidate")
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
-    resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")
+    resumes = relationship(
+        "Resume", back_populates="user", cascade="all, delete-orphan"
+    )
     interview_sessions = relationship(
         "InterviewSession", back_populates="user", cascade="all, delete-orphan"
     )
@@ -24,7 +26,9 @@ class Resume(Base):
     __tablename__ = "resumes"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     blob_url = Column(String)
     parsed_data = Column(JSON)
     ats_score = Column(Integer)
@@ -37,7 +41,9 @@ class JobDescription(Base):
     __tablename__ = "job_descriptions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    recruiter_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    recruiter_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     title = Column(String)
     parsed_data = Column(JSON)
     raw_text = Column(Text)
@@ -48,7 +54,9 @@ class InterviewSession(Base):
     __tablename__ = "interview_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     company = Column(String)
     role = Column(String)
     history = Column(JSON, default=list)

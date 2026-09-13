@@ -25,6 +25,7 @@ AsyncSessionLocal = sessionmaker(
 
 class Base(DeclarativeBase):
     """SQLAlchemy 2.0 declarative base for all ORM models."""
+
     pass
 
 

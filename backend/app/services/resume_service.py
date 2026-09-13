@@ -1,4 +1,5 @@
 """ResumeService — handles PDF upload, text extraction, LLM parsing, DB persistence."""
+
 import io
 import logging
 import os
@@ -103,7 +104,9 @@ class ResumeService:
         """Return all resumes for a user, newest first. Used by dashboard."""
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(Resume).where(Resume.user_id == user_id).order_by(Resume.created_at.desc())
+                select(Resume)
+                .where(Resume.user_id == user_id)
+                .order_by(Resume.created_at.desc())
             )
             resumes = result.scalars().all()
             return [

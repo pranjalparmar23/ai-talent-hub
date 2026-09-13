@@ -3,6 +3,7 @@
 Connects to the ChromaDB container and exposes a thin API for adding
 documents, querying, and managing collections.
 """
+
 import logging
 import os
 import uuid

@@ -4,6 +4,7 @@ Splits long documents into overlapping chunks sized for embedding + retrieval.
 Chunk size 500 / overlap 50 chosen in Phase 2 eval as the best precision/recall
 tradeoff for our seed data.
 """
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 

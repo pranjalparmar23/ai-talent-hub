@@ -4,6 +4,7 @@ All routes require JWT auth via get_current_user (returns dict with id/email/rol
 Route handlers stay thin — they validate input, load DB rows, delegate to services
 or graphs, and return typed responses.
 """
+
 from fastapi import APIRouter, Depends, File, UploadFile, status
 
 from app.database.schemas import (
@@ -35,7 +36,12 @@ router = APIRouter()
 # RESUME
 # ═════════════════════════════════════════════════════════════════════════════
 
-@router.post("/resume/upload", response_model=ResumeUploadResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/resume/upload",
+    response_model=ResumeUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_resume(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
@@ -69,7 +75,10 @@ async def get_my_resume(
 # JOB DESCRIPTION (target JDs — for candidates comparing themselves against a role)
 # ═════════════════════════════════════════════════════════════════════════════
 
-@router.post("/jd", response_model=JDUploadResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/jd", response_model=JDUploadResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_target_jd(
     body: JDCreateRequest,
     current_user: dict = Depends(get_current_user),
@@ -96,6 +105,7 @@ async def list_my_jds(
 # ATS SCORE / SKILL GAP / ROADMAP
 # All three require an existing resume + JD in the DB.
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 @router.get("/ats-score", response_model=ATSScoreResponse)
 async def get_ats_score(
@@ -164,13 +174,16 @@ async def get_learning_plan(
 # INTERVIEW (Phase 4 — routes stay unchanged, agent wiring comes later)
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 @router.post("/interview/start", response_model=InterviewStartResponse)
 async def start_interview(
     body: InterviewStartRequest,
     current_user: dict = Depends(get_current_user),
     interview_service: InterviewService = Depends(InterviewService),
 ):
-    return await interview_service.start_session(body.company, body.role, current_user["id"])
+    return await interview_service.start_session(
+        body.company, body.role, current_user["id"]
+    )
 
 
 @router.post("/interview/{session_id}/respond", response_model=InterviewRespondResponse)
@@ -183,7 +196,9 @@ async def respond_to_interview(
     return await interview_service.process_response(session_id, body.response)
 
 
-@router.get("/interview/{session_id}/feedback", response_model=InterviewFeedbackResponse)
+@router.get(
+    "/interview/{session_id}/feedback", response_model=InterviewFeedbackResponse
+)
 async def get_interview_feedback(
     session_id: str,
     current_user: dict = Depends(get_current_user),

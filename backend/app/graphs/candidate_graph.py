@@ -9,6 +9,7 @@ The graph has two entry patterns:
 Both interview and evaluation live in Phase 4 — imported here for wiring but the
 graph doesn't yet include them as nodes.
 """
+
 import logging
 from typing import Any
 
@@ -161,9 +162,11 @@ class CandidateGraph:
         target_role = jd_data.get("title") or "target role"
 
         gap = await self.skill_gap.analyze(resume_skills, jd_skills)
-        missing = gap.get("missing_skills", []) or []
+        priority_skills = (
+            gap.get("priority_missing") or gap.get("missing_skills", [])[:5]
+        )
 
-        plan = await self.roadmap.generate(missing, target_role)
+        plan = await self.roadmap.generate(priority_skills, target_role)
 
         return {
             "target_role": target_role,

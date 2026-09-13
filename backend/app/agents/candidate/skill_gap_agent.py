@@ -1,4 +1,5 @@
 """SkillGapAgent — compares candidate skills against JD skills via Groq."""
+
 import json
 import logging
 from typing import Any
@@ -79,10 +80,14 @@ class SkillGapAgent:
             }
 
         try:
-            response = await self.chain.ainvoke({
-                "candidate_skills": json.dumps(candidate_skills, ensure_ascii=False),
-                "jd_skills": json.dumps(jd_skills, ensure_ascii=False),
-            })
+            response = await self.chain.ainvoke(
+                {
+                    "candidate_skills": json.dumps(
+                        candidate_skills, ensure_ascii=False
+                    ),
+                    "jd_skills": json.dumps(jd_skills, ensure_ascii=False),
+                }
+            )
         except Exception as e:
             logger.exception("Groq call failed in SkillGapAgent")
             return {**_GAP_FALLBACK, "_error_reason": str(e)[:200]}

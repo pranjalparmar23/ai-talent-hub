@@ -14,6 +14,7 @@ Run with:
 Skipped by default in CI (see @pytest.mark.integration). Enable via:
     pytest -v -m integration --run-integration
 """
+
 import os
 import pytest
 
@@ -94,6 +95,7 @@ Responsibilities:
 
 # ── Individual agent smoke tests ─────────────────────────────────────
 
+
 class TestResumeParser:
     """Verifies ResumeParserAgent against real Groq."""
 
@@ -110,8 +112,9 @@ class TestResumeParser:
         skills = parsed.get("skills", [])
         assert len(skills) >= 5
         # Each skill should be a short string, not a full sentence
-        assert all(len(s.split()) <= 4 for s in skills), \
-            f"Some skills look like sentences: {skills}"
+        assert all(
+            len(s.split()) <= 4 for s in skills
+        ), f"Some skills look like sentences: {skills}"
 
         # Recognizes Python as a listed skill (case-insensitive)
         assert any("python" in s.lower() for s in skills)
@@ -122,8 +125,9 @@ class TestResumeParser:
         assert 2 <= years <= 5  # candidate says "3 years"
 
         # No parse error on a clean resume
-        assert not parsed.get("_parse_error"), \
-            f"Parse error occurred: {parsed.get('_raw_output', '')}"
+        assert not parsed.get(
+            "_parse_error"
+        ), f"Parse error occurred: {parsed.get('_raw_output', '')}"
 
 
 class TestJDAnalyzer:
@@ -150,8 +154,9 @@ class TestJDAnalyzer:
         # Nice-to-haves went to preferred
         preferred_lower = [s.lower() for s in preferred]
         # Rust or gRPC should be in preferred (both are in "Nice to have")
-        assert any("rust" in s or "grpc" in s or "protobuf" in s for s in preferred_lower), \
-            f"Expected nice-to-haves in preferred, got {preferred}"
+        assert any(
+            "rust" in s or "grpc" in s or "protobuf" in s for s in preferred_lower
+        ), f"Expected nice-to-haves in preferred, got {preferred}"
 
         # Experience years extracted
         assert parsed.get("experience_years_min") == 5
@@ -161,6 +166,7 @@ class TestJDAnalyzer:
 
 
 # ── Full pipeline through the graph ──────────────────────────────────
+
 
 class TestCandidateGraph:
     """End-to-end: parse resume + JD, then run analysis pipeline."""
@@ -188,8 +194,9 @@ class TestCandidateGraph:
 
         # Aarav is a 3-year candidate applying for 5+ senior role with cloud gaps —
         # score should reflect partial match (roughly 30-70)
-        assert 25 <= result["ats_score"] <= 75, \
-            f"Unexpected score for partial-match scenario: {result['ats_score']}"
+        assert (
+            25 <= result["ats_score"] <= 75
+        ), f"Unexpected score for partial-match scenario: {result['ats_score']}"
 
         # Response shape complete
         assert isinstance(result["matching_keywords"], list)
@@ -224,13 +231,15 @@ class TestCandidateGraph:
         assert 0.0 <= result["gap_percentage"] <= 100.0
 
         # There ARE gaps — candidate is missing K8s, AWS, Kafka, Terraform
-        assert result["gap_percentage"] > 20.0, \
-            "Expected meaningful gap for this partial-match scenario"
+        assert (
+            result["gap_percentage"] > 20.0
+        ), "Expected meaningful gap for this partial-match scenario"
 
         # Fuzzy matching works — candidate has "PostgreSQL", JD asks "PostgreSQL"
         matching_lower = [s.lower() for s in result["matching_skills"]]
-        assert any("postgres" in s for s in matching_lower), \
-            f"Expected PostgreSQL to match, matching_skills={result['matching_skills']}"
+        assert any(
+            "postgres" in s for s in matching_lower
+        ), f"Expected PostgreSQL to match, matching_skills={result['matching_skills']}"
 
     @pytest.mark.asyncio
     async def test_learning_plan_produces_valid_result(self):
@@ -249,7 +258,9 @@ class TestCandidateGraph:
         assert result["target_role"]
         weeks = result.get("weeks", [])
         assert isinstance(weeks, list)
-        assert len(weeks) >= 2, "Should produce at least a 2-week plan for multiple gaps"
+        assert (
+            len(weeks) >= 2
+        ), "Should produce at least a 2-week plan for multiple gaps"
 
         # Each week has required fields
         for week in weeks:
@@ -263,7 +274,9 @@ class TestCandidateGraph:
         all_resources = [r for w in weeks for r in w.get("resources", [])]
         # We can't strictly assert non-empty resources — RAG might return nothing —
         # but we can log for visibility
-        print(f"\nLearning plan referenced {len(all_resources)} resources across {len(weeks)} weeks")
+        print(
+            f"\nLearning plan referenced {len(all_resources)} resources across {len(weeks)} weeks"
+        )
 
         # No parse error on the plan itself
         assert not result.get("_parse_error")

@@ -10,6 +10,7 @@ Safe to re-run — uses get_or_create semantics.
 # ── Silence ChromaDB PostHog telemetry (must be BEFORE any other imports) ──
 try:
     import posthog
+
     posthog.capture = lambda *args, **kwargs: None
     posthog.Posthog.capture = lambda *args, **kwargs: None
 except ImportError:
@@ -36,8 +37,10 @@ def main() -> int:
         print(f"   Heartbeat: {heartbeat}")
     except Exception as e:
         print(f"❌ Cannot reach ChromaDB: {e}")
-        print(f"   Check CHROMA_HOST/CHROMA_PORT in .env (currently "
-              f"{os.getenv('CHROMA_HOST', 'localhost')}:{os.getenv('CHROMA_PORT', '8001')})")
+        print(
+            f"   Check CHROMA_HOST/CHROMA_PORT in .env (currently "
+            f"{os.getenv('CHROMA_HOST', 'localhost')}:{os.getenv('CHROMA_PORT', '8001')})"
+        )
         print("   Is the container running?  docker compose ps chromadb")
         return 1
 
@@ -46,7 +49,7 @@ def main() -> int:
         VectorStore.get_or_create_collection(spec)
         print(f"   ✅ {spec.name:30s}  ({spec.description})")
 
-    print(f"\n📋 Collections currently in ChromaDB:")
+    print("\n📋 Collections currently in ChromaDB:")
     for name in VectorStore.list_collections():
         marker = "✓" if name in [c.name for c in COLLECTIONS] else "?"
         print(f"   {marker} {name}")

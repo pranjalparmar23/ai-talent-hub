@@ -4,6 +4,7 @@ JDs can be created from raw text (paste into UI) or from PDF upload (Phase 5).
 For now we support the text path; PDF handling will reuse ResumeService's PDF
 extractor when the recruiter flow lands.
 """
+
 import logging
 
 from fastapi import HTTPException, status
@@ -69,7 +70,9 @@ class JDService:
     async def get_jd(self, jd_id: str, user_id: str) -> dict:
         """Fetch a JD by ID, enforcing owner-only access."""
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(JobDescription).where(JobDescription.id == jd_id))
+            result = await db.execute(
+                select(JobDescription).where(JobDescription.id == jd_id)
+            )
             jd = result.scalar_one_or_none()
 
             if not jd:

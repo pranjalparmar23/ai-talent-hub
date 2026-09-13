@@ -15,8 +15,12 @@ class RecruiterService:
         raw_text = self._extract_text(content)
         parsed = await self.analyzer.analyze(raw_text)
         async with AsyncSessionLocal() as db:
-            jd = JobDescription(recruiter_id=recruiter_id, raw_text=raw_text,
-                                parsed_data=parsed, title=parsed.get("title", ""))
+            jd = JobDescription(
+                recruiter_id=recruiter_id,
+                raw_text=raw_text,
+                parsed_data=parsed,
+                title=parsed.get("title", ""),
+            )
             db.add(jd)
             await db.commit()
             return {"jd_id": str(jd.id), "parsed_data": parsed}

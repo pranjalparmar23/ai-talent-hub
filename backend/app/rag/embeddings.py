@@ -3,6 +3,7 @@
 Uses all-MiniLM-L6-v2 (384-dim) — small, fast, runs on CPU, no API key needed.
 This is a deliberate choice: no OpenAI/Azure dependency, everything local/free.
 """
+
 import logging
 import threading
 

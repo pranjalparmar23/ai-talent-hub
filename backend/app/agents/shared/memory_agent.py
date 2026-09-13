@@ -18,7 +18,10 @@ class MemoryAgent:
 
     async def get_history(self) -> list:
         return [
-            {"role": "human" if isinstance(m, HumanMessage) else "ai", "content": m.content}
+            {
+                "role": "human" if isinstance(m, HumanMessage) else "ai",
+                "content": m.content,
+            }
             for m in self.history.messages
         ]
 

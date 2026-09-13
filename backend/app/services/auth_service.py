@@ -8,7 +8,9 @@ from app.database.postgres import AsyncSessionLocal
 from app.database.models import User
 from app.database.schemas import UserCreate, Token
 
-SECRET_KEY = os.getenv("SECRET_KEY", "0a6389904da316b26f94c2487af5e6a082e5f7aaa50c00710711c7ebc0e6f52d")
+SECRET_KEY = os.getenv(
+    "SECRET_KEY", "0a6389904da316b26f94c2487af5e6a082e5f7aaa50c00710711c7ebc0e6f52d"
+)
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")) * 24 * 60

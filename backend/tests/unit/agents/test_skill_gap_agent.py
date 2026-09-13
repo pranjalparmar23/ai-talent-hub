@@ -7,6 +7,7 @@ Tests focus on:
   - priority_missing capped at 5
   - Fallback shape
 """
+
 import pytest
 
 from app.agents.candidate.skill_gap_agent import SkillGapAgent
@@ -20,10 +21,13 @@ def agent():
 
 # ── Happy path ────────────────────────────────────────────────────────
 
+
 class TestHappyPath:
     @pytest.mark.asyncio
     async def test_parses_full_response(self, agent):
-        agent.chain = FakeChain(response=FakeMsg('''
+        agent.chain = FakeChain(
+            response=FakeMsg(
+                """
         {
             "matching_skills": ["Python", "PostgreSQL"],
             "missing_skills": ["Kubernetes", "AWS"],
@@ -31,7 +35,9 @@ class TestHappyPath:
             "priority_missing": ["Kubernetes", "AWS"],
             "notes": "Strong core, missing cloud."
         }
-        '''))
+        """
+            )
+        )
 
         result = await agent.analyze(
             candidate_skills=["Python", "PostgreSQL", "FastAPI"],
@@ -45,6 +51,7 @@ class TestHappyPath:
 
 # ── Gap percentage recomputation ─────────────────────────────────────
 
+
 class TestGapRecomputation:
     """SkillGapAgent recomputes gap_percentage from actual list counts,
     ignoring whatever the LLM said. LLMs are bad at arithmetic."""
@@ -52,13 +59,17 @@ class TestGapRecomputation:
     @pytest.mark.asyncio
     async def test_recomputes_when_llm_math_is_wrong(self, agent):
         """LLM claims 60% but math says 25%."""
-        agent.chain = FakeChain(response=FakeMsg('''
+        agent.chain = FakeChain(
+            response=FakeMsg(
+                """
         {"matching_skills": ["A", "B", "C"],
          "missing_skills": ["D"],
          "gap_percentage": 60,
          "priority_missing": ["D"],
          "notes": ""}
-        '''))
+        """
+            )
+        )
 
         result = await agent.analyze(
             candidate_skills=["a", "b", "c"],
@@ -70,12 +81,16 @@ class TestGapRecomputation:
 
     @pytest.mark.asyncio
     async def test_perfect_match_gives_zero_gap(self, agent):
-        agent.chain = FakeChain(response=FakeMsg('''
+        agent.chain = FakeChain(
+            response=FakeMsg(
+                """
         {"matching_skills": ["Python", "FastAPI"],
          "missing_skills": [],
          "gap_percentage": 0,
          "priority_missing": [], "notes": ""}
-        '''))
+        """
+            )
+        )
 
         result = await agent.analyze(
             candidate_skills=["Python", "FastAPI"],
@@ -86,6 +101,7 @@ class TestGapRecomputation:
 
 
 # ── Edge cases (no LLM call) ─────────────────────────────────────────
+
 
 class TestEdgeCases:
     @pytest.mark.asyncio
@@ -115,13 +131,17 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_priority_missing_capped_at_5(self, agent):
         """LLM occasionally ignores the 3-5 cap. We enforce it."""
-        agent.chain = FakeChain(response=FakeMsg('''
+        agent.chain = FakeChain(
+            response=FakeMsg(
+                """
         {"matching_skills": [],
          "missing_skills": ["a", "b", "c", "d", "e", "f", "g", "h"],
          "gap_percentage": 100,
          "priority_missing": ["a", "b", "c", "d", "e", "f", "g", "h"],
          "notes": ""}
-        '''))
+        """
+            )
+        )
 
         result = await agent.analyze(
             candidate_skills=["z"],
@@ -132,6 +152,7 @@ class TestEdgeCases:
 
 
 # ── Input coercion ────────────────────────────────────────────────────
+
 
 class TestInputCoercion:
     @pytest.mark.asyncio
@@ -147,10 +168,14 @@ class TestInputCoercion:
         """Non-string items and empty strings dropped from inputs."""
         # Both branches short-circuit before LLM if either list ends up empty
         # We provide clean data on JD side and messy on candidate
-        agent.chain = FakeChain(response=FakeMsg('''
+        agent.chain = FakeChain(
+            response=FakeMsg(
+                """
         {"matching_skills": ["Python"], "missing_skills": ["AWS"],
          "gap_percentage": 50, "priority_missing": ["AWS"], "notes": ""}
-        '''))
+        """
+            )
+        )
 
         result = await agent.analyze(
             candidate_skills=["Python", "", None, "  ", " FastAPI "],
@@ -162,6 +187,7 @@ class TestInputCoercion:
 
 
 # ── Fallback ─────────────────────────────────────────────────────────
+
 
 class TestFallback:
     @pytest.mark.asyncio
