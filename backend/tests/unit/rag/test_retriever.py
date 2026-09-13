@@ -2,8 +2,6 @@ import pytest
 from unittest.mock import patch
 from app.rag.retriever import RAGRetriever
 
-
-@pytest.mark.asyncio
 def test_retrieve_returns_list():
     retriever = RAGRetriever()
     mock_docs = [{"content": "Docker tutorial", "metadata": {}}]

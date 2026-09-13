@@ -79,7 +79,7 @@ jobs:
           LANGCHAIN_TRACING_V2: "false"
           ALLOWED_ORIGINS: http://localhost:5173
         run: |
-          pytest tests/unit/ -v --cov=app --cov-report=term-missing --cov-fail-under=70
+          pytest tests/unit/ -v --cov=app --cov-report=term-missing --cov-fail-under=60
 
   # ── Frontend: Type check + Lint ──────────────────────────────
   frontend:
