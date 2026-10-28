@@ -50,6 +50,7 @@ class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    role: Optional[str] = None  # set on login so the UI can route by role
 
 
 class RefreshTokenRequest(BaseModel):

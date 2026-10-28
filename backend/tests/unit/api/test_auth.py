@@ -78,6 +78,22 @@ async def test_login_valid_credentials(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["candidate", "recruiter"])
+async def test_login_returns_the_users_role(client: AsyncClient, role: str):
+    email = _unique_email(f"role-{role}")
+    await client.post(
+        "/api/auth/register",
+        json={"email": email, "password": "SecurePass123", "role": role},
+    )
+    response = await client.post(
+        "/api/auth/login",
+        data={"username": email, "password": "SecurePass123"},
+    )
+    assert response.status_code == 200
+    assert response.json()["role"] == role
+
+
+@pytest.mark.asyncio
 async def test_login_wrong_password(client: AsyncClient):
     email = _unique_email("wrongpw")
     await client.post(
