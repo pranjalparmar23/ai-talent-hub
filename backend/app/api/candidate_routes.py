@@ -12,6 +12,7 @@ from app.database.schemas import (
     InterviewFeedbackResponse,
     InterviewRespondRequest,
     InterviewRespondResponse,
+    InterviewSessionResponse,
     InterviewStartRequest,
     InterviewStartResponse,
     JDCreateRequest,
@@ -171,7 +172,7 @@ async def get_learning_plan(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# INTERVIEW (Phase 4 — routes stay unchanged, agent wiring comes later)
+# INTERVIEW (Phase 4)
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -186,6 +187,15 @@ async def start_interview(
     )
 
 
+@router.get("/interview/{session_id}", response_model=InterviewSessionResponse)
+async def get_interview_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+    interview_service: InterviewService = Depends(InterviewService),
+):
+    return await interview_service.get_session(session_id, current_user["id"])
+
+
 @router.post("/interview/{session_id}/respond", response_model=InterviewRespondResponse)
 async def respond_to_interview(
     session_id: str,
@@ -193,7 +203,9 @@ async def respond_to_interview(
     current_user: dict = Depends(get_current_user),
     interview_service: InterviewService = Depends(InterviewService),
 ):
-    return await interview_service.process_response(session_id, body.response)
+    return await interview_service.process_response(
+        session_id, body.response, current_user["id"]
+    )
 
 
 @router.get(
@@ -204,4 +216,4 @@ async def get_interview_feedback(
     current_user: dict = Depends(get_current_user),
     interview_service: InterviewService = Depends(InterviewService),
 ):
-    return await interview_service.generate_feedback(session_id)
+    return await interview_service.generate_feedback(session_id, current_user["id"])
