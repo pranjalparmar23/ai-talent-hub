@@ -66,7 +66,7 @@ def candidate(name, skills, years=5, interview=None, cid=None):
             "name": name,
             "email": f"{name.lower()}@example.com",
             "skills": skills,
-            "years_of_experience": years,
+            "experience_years": years,
         },
     }
 

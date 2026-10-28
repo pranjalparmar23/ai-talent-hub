@@ -4,6 +4,7 @@ Used by both candidate flow (candidate uploads a target JD to compare against)
 and recruiter flow (Phase 5, recruiter uploads a JD to rank candidates).
 """
 
+import copy
 import logging
 import re
 
@@ -52,7 +53,7 @@ class JDAnalyzerAgent:
         """
         if not raw_text or not raw_text.strip():
             logger.warning("JDAnalyzerAgent called with empty text")
-            return {**_JD_FALLBACK, "_error_reason": "empty_input"}
+            return self._fallback(_error_reason="empty_input")
 
         if len(raw_text) > 30_000:
             logger.warning(f"JD text truncated from {len(raw_text)} to 30000 chars")
@@ -62,14 +63,28 @@ class JDAnalyzerAgent:
             response = await self.chain.ainvoke({"jd_text": raw_text})
         except Exception as e:
             logger.exception("Groq call failed in JDAnalyzerAgent")
-            return {**_JD_FALLBACK, "_error_reason": str(e)[:200]}
+            return self._fallback(_error_reason=str(e)[:200])
 
         parsed = parse_llm_json(
             response.content,
-            fallback={**_JD_FALLBACK, "_raw_output": response.content[:500]},
+            fallback=self._fallback(_raw_output=response.content[:500]),
         )
 
+        # The LLM can return valid JSON that is not an object (a list, a string,
+        # null). Treat that like any other unusable output instead of crashing.
+        if not isinstance(parsed, dict):
+            return self._fallback(
+                _error_reason="not_a_json_object",
+                _raw_output=response.content[:500],
+            )
+
         return self._normalize(parsed)
+
+    @staticmethod
+    def _fallback(**extra) -> dict:
+        """A fresh fallback dict each time, so callers can never share (or
+        corrupt) the module-level template's lists."""
+        return {**copy.deepcopy(_JD_FALLBACK), **extra}
 
     # ── Normalization ────────────────────────────────────────────────────
 
