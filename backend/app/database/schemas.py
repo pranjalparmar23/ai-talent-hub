@@ -50,6 +50,7 @@ class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    role: Optional[str] = None  # set on login so the UI can route by role
 
 
 class RefreshTokenRequest(BaseModel):
@@ -283,21 +284,69 @@ class InterviewFeedbackResponse(BaseModel):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# RECRUITER (Phase 5 — placeholders)
+# RECRUITER
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+class RankCandidatesRequest(BaseModel):
+    """Optional body for POST /api/recruiter/jd/{jd_id}/rank-candidates."""
+
+    top_n: Optional[int] = Field(default=None, ge=1, le=100)
+
+
 class CandidateRankingItem(BaseModel):
+    """One scored candidate. `rank` and the scores are None when not scorable."""
+
+    rank: Optional[int] = None
     candidate_id: str
-    name: str
-    match_score: float
+    resume_id: Optional[str] = None
+    name: Optional[str] = None
+    match_score: Optional[float] = None
+    skill_match: Optional[float] = None
+    experience_match: Optional[float] = None
+    semantic_match: Optional[float] = None
+    semantic_available: bool = False
     matching_skills: List[str] = Field(default_factory=list)
     missing_skills: List[str] = Field(default_factory=list)
+    matching_preferred: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    interview_score: Optional[float] = None
 
 
 class CandidateRankingResponse(BaseModel):
     jd_id: str
+    jd_title: Optional[str] = None
+    total_candidates: int = 0
     ranked_candidates: List[CandidateRankingItem] = Field(default_factory=list)
+
+
+class RecruiterQuestion(BaseModel):
+    question: str
+    category: str
+    difficulty: str
+    rationale: Optional[str] = None
+
+
+class RecruiterQuestionsResponse(BaseModel):
+    jd_id: str
+    candidate_id: str
+    questions: List[RecruiterQuestion] = Field(default_factory=list)
+    parse_error: bool = False
+
+
+class HiringRecommendationResponse(BaseModel):
+    jd_id: str
+    candidate_id: str
+    recommendation: Literal["HIRE", "CONSIDER", "REJECT"]
+    confidence: int = Field(ge=0, le=100)
+    combined_score: Optional[float] = None
+    match_score: Optional[float] = None
+    interview_score: Optional[float] = None
+    flags: List[str] = Field(default_factory=list)
+    reasoning: str = ""
+    strengths: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    reasoning_source: Literal["llm", "template"] = "template"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

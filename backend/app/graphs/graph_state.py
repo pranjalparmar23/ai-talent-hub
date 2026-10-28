@@ -13,8 +13,12 @@ class TalentHubState(TypedDict, total=False):
     learning_plan: dict
     interview_history: List[dict]
     interview_feedback: dict
+    jd_id: str
+    jd_title: str
+    top_n: Optional[int]
+    candidates: List[dict]
     candidate_scores: List[dict]
     ranked_candidates: List[dict]
-    interview_questions: List[str]
-    hiring_recommendation: str
+    interview_questions: List[dict]
+    hiring_recommendation: dict
     error: Optional[str]

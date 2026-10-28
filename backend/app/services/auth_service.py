@@ -48,6 +48,7 @@ class AuthService:
             return Token(
                 access_token=self._create_token(str(user.id), ACCESS_TOKEN_EXPIRE),
                 refresh_token=self._create_token(str(user.id), REFRESH_TOKEN_EXPIRE),
+                role=user.role,
             )
 
     def _create_token(self, user_id: str, expire_minutes: int) -> str:
