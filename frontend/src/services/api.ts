@@ -103,6 +103,47 @@ export interface LearningPlanResponse {
   summary: string | null;
 }
 
+// ── Interview (Phase 4) ─────────────────────────────────────
+
+export interface InterviewMessage {
+  role: "interviewer" | "candidate";
+  content: string;
+}
+
+export interface InterviewStartResponse {
+  session_id: string;
+  question: string;
+  question_number: number;
+  max_questions: number;
+}
+
+export interface InterviewRespondResponse {
+  question: string;
+  session_complete: boolean;
+  question_number: number;
+  max_questions: number;
+}
+
+export interface InterviewSession {
+  session_id: string;
+  company: string;
+  role: string;
+  messages: InterviewMessage[];
+  question_number: number;
+  max_questions: number;
+  session_complete: boolean;
+  feedback_ready: boolean;
+}
+
+export interface InterviewFeedback {
+  scores: Record<string, number>;
+  overall_score: number;
+  strengths: string[];
+  improvements: string[];
+  summary: string | null;
+  parse_error: boolean;
+}
+
 // ═════════════════════════════════════════════════════════════
 // Auth
 // ═════════════════════════════════════════════════════════════
@@ -165,13 +206,22 @@ export const candidateAPI = {
 
   // Interview (Phase 4)
   startInterview: (company: string, role: string) =>
-    api.post("/candidate/interview/start", { company, role }),
+    api.post<InterviewStartResponse>("/candidate/interview/start", {
+      company,
+      role,
+    }),
+
+  getInterviewSession: (sessionId: string) =>
+    api.get<InterviewSession>(`/candidate/interview/${sessionId}`),
 
   respondToInterview: (sessionId: string, response: string) =>
-    api.post(`/candidate/interview/${sessionId}/respond`, { response }),
+    api.post<InterviewRespondResponse>(
+      `/candidate/interview/${sessionId}/respond`,
+      { response }
+    ),
 
   getInterviewFeedback: (sessionId: string) =>
-    api.get(`/candidate/interview/${sessionId}/feedback`),
+    api.get<InterviewFeedback>(`/candidate/interview/${sessionId}/feedback`),
 };
 
 // ═════════════════════════════════════════════════════════════

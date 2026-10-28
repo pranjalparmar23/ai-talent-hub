@@ -7,6 +7,9 @@ import Register from './auth/Register'
 // Candidate pages
 import CandidateDashboard from './candidate/Dashboard'
 import AnalysisView from './candidate/AnalysisView' 
+import InterviewSetup from './candidate/InterviewSetup'
+import InterviewChat from './candidate/InterviewChat'
+import InterviewFeedback from './candidate/InterviewFeedback'
 
 // Recruiter pages
 import RecruiterDashboard from './recruiter/Dashboard'
@@ -31,6 +34,24 @@ export default function App() {
       <Route path="/candidate/analysis" element={          
         <PrivateRoute>
           <AnalysisView />
+        </PrivateRoute>
+      } />
+
+      <Route path="/candidate/interview" element={
+        <PrivateRoute>
+          <InterviewSetup />
+        </PrivateRoute>
+      } />
+
+      <Route path="/candidate/interview/:sessionId" element={
+        <PrivateRoute>
+          <InterviewChat />
+        </PrivateRoute>
+      } />
+
+      <Route path="/candidate/interview/:sessionId/feedback" element={
+        <PrivateRoute>
+          <InterviewFeedback />
         </PrivateRoute>
       } />
 

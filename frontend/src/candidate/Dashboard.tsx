@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { LogOut, Plus, FileText, Briefcase, ArrowRight, Loader2 } from 'lucide-react'
+import { LogOut, Plus, FileText, Briefcase, ArrowRight, Loader2, Mic } from 'lucide-react'
 import {
   candidateAPI,
   type ResumeSummary,
@@ -65,13 +65,22 @@ export default function CandidateDashboard() {
           <span className="text-[#7CFFC4]">◆</span>
           <span className="font-medium tracking-tight">Talent Hub</span>
         </div>
-        <button
-          onClick={handleLogout}
-          className="text-xs text-[#8996AD] hover:text-[#E7ECF3] flex items-center gap-1.5 transition-colors"
-        >
-          <LogOut size={14} />
-          Sign out
-        </button>
+        <div className="flex items-center gap-6">
+          <button
+            onClick={() => navigate('/candidate/interview')}
+            className="text-xs text-[#8996AD] hover:text-[#7CFFC4] flex items-center gap-1.5 transition-colors"
+          >
+            <Mic size={14} />
+            Mock interview
+          </button>
+          <button
+            onClick={handleLogout}
+            className="text-xs text-[#8996AD] hover:text-[#E7ECF3] flex items-center gap-1.5 transition-colors"
+          >
+            <LogOut size={14} />
+            Sign out
+          </button>
+        </div>
       </nav>
 
       {/* ── Status hero ─────────────────────────────────────── */}

@@ -1,7 +1,7 @@
 """Pydantic request/response schemas — one source of truth for API shapes."""
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 import uuid
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -225,22 +225,52 @@ class LearningPlanResponse(BaseModel):
 
 
 class InterviewStartRequest(BaseModel):
-    company: str
-    role: str
+    company: str = Field(min_length=1, max_length=100)
+    role: str = Field(min_length=1, max_length=100)
+
+    @field_validator("company", "role")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        return v
 
 
 class InterviewStartResponse(BaseModel):
     session_id: str
     question: str
+    question_number: int = 1
+    max_questions: int = 6
 
 
 class InterviewRespondRequest(BaseModel):
-    response: str
+    response: str = Field(min_length=1, max_length=4000)
 
 
 class InterviewRespondResponse(BaseModel):
     question: str
     session_complete: bool = False
+    question_number: int = 1
+    max_questions: int = 6
+
+
+class InterviewMessage(BaseModel):
+    role: Literal["interviewer", "candidate"]
+    content: str
+
+
+class InterviewSessionResponse(BaseModel):
+    """Full session state — lets the chat UI restore after a page refresh."""
+
+    session_id: str
+    company: str
+    role: str
+    messages: List[InterviewMessage] = Field(default_factory=list)
+    question_number: int = 1
+    max_questions: int = 6
+    session_complete: bool = False
+    feedback_ready: bool = False
 
 
 class InterviewFeedbackResponse(BaseModel):
@@ -248,6 +278,8 @@ class InterviewFeedbackResponse(BaseModel):
     overall_score: float
     strengths: List[str] = Field(default_factory=list)
     improvements: List[str] = Field(default_factory=list)
+    summary: Optional[str] = None
+    parse_error: bool = False
 
 
 # ═════════════════════════════════════════════════════════════════════════════
