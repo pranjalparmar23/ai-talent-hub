@@ -159,15 +159,16 @@ export interface RankCandidatesRequest {
   top_n?: number;
 }
 
+/** rank and the scores are null when a candidate could not be scored. */
 export interface CandidateRankingItem {
-  rank: number;
+  rank: number | null;
   candidate_id: string;
-  resume_id: string;
-  name: string;
-  match_score: number;
-  skill_match: number;
-  experience_match: number;
-  semantic_match: number;
+  resume_id: string | null;
+  name: string | null;
+  match_score: number | null;
+  skill_match: number | null;
+  experience_match: number | null;
+  semantic_match: number | null;
   semantic_available: boolean;
   matching_skills: string[];
   missing_skills: string[];
@@ -178,7 +179,7 @@ export interface CandidateRankingItem {
 
 export interface CandidateRankingResponse {
   jd_id: string;
-  jd_title: string;
+  jd_title: string | null;
   total_candidates: number;
   ranked_candidates: CandidateRankingItem[];
 }
@@ -187,7 +188,7 @@ export interface RecruiterQuestion {
   question: string;
   category: string;
   difficulty: string;
-  rationale: string;
+  rationale: string | null;
 }
 
 export interface RecruiterQuestionsResponse {
@@ -204,8 +205,8 @@ export interface HiringRecommendationResponse {
   candidate_id: string;
   recommendation: HiringVerdict;
   confidence: number;
-  combined_score: number;
-  match_score: number;
+  combined_score: number | null;
+  match_score: number | null;
   interview_score: number | null;
   flags: string[];
   reasoning: string;
