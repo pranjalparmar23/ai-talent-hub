@@ -28,6 +28,14 @@ api.interceptors.response.use(
 // Types — mirror backend Pydantic schemas
 // ═════════════════════════════════════════════════════════════
 
+export interface LoginResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  /** "candidate" | "recruiter" — returned by login so the UI can route by role. */
+  role?: string | null;
+}
+
 export interface ResumeUploadResponse {
   resume_id: string;
   parsed_data: Record<string, unknown>;
@@ -144,6 +152,68 @@ export interface InterviewFeedback {
   parse_error: boolean;
 }
 
+// ── Recruiter (Phase 5) ─────────────────────────────────────
+
+export interface RankCandidatesRequest {
+  /** Return only the best N candidates (1-100). Omit for everyone. */
+  top_n?: number;
+}
+
+export interface CandidateRankingItem {
+  rank: number;
+  candidate_id: string;
+  resume_id: string;
+  name: string;
+  match_score: number;
+  skill_match: number;
+  experience_match: number;
+  semantic_match: number;
+  semantic_available: boolean;
+  matching_skills: string[];
+  missing_skills: string[];
+  matching_preferred: string[];
+  summary: string | null;
+  interview_score: number | null;
+}
+
+export interface CandidateRankingResponse {
+  jd_id: string;
+  jd_title: string;
+  total_candidates: number;
+  ranked_candidates: CandidateRankingItem[];
+}
+
+export interface RecruiterQuestion {
+  question: string;
+  category: string;
+  difficulty: string;
+  rationale: string;
+}
+
+export interface RecruiterQuestionsResponse {
+  jd_id: string;
+  candidate_id: string;
+  questions: RecruiterQuestion[];
+  parse_error: boolean;
+}
+
+export type HiringVerdict = "HIRE" | "CONSIDER" | "REJECT";
+
+export interface HiringRecommendationResponse {
+  jd_id: string;
+  candidate_id: string;
+  recommendation: HiringVerdict;
+  confidence: number;
+  combined_score: number;
+  match_score: number;
+  interview_score: number | null;
+  flags: string[];
+  reasoning: string;
+  strengths: string[];
+  risks: string[];
+  reasoning_source: "llm" | "template";
+}
+
 // ═════════════════════════════════════════════════════════════
 // Auth
 // ═════════════════════════════════════════════════════════════
@@ -153,7 +223,7 @@ export const authAPI = {
     api.post("/auth/register", data),
 
   login: (email: string, password: string) =>
-    api.post(
+    api.post<LoginResponse>(
       "/auth/login",
       new URLSearchParams({ username: email, password }),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
@@ -225,22 +295,32 @@ export const candidateAPI = {
 };
 
 // ═════════════════════════════════════════════════════════════
-// Recruiter (Phase 5 — kept for compatibility, updated later)
+// Recruiter (Phase 5) — every route needs the "recruiter" role
 // ═════════════════════════════════════════════════════════════
 
 export const recruiterAPI = {
   uploadJD: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    return api.post("/recruiter/jd/upload", form);
+    return api.post<JDUploadResponse>("/recruiter/jd/upload", form);
   },
 
-  rankCandidates: (jdId: string) =>
-    api.get(`/recruiter/jd/${jdId}/rank-candidates`),
+  listJDs: () => api.get<JDSummary[]>("/recruiter/jds"),
 
-  getInterviewQuestions: (jdId: string, candidateId: string) =>
-    api.get(`/recruiter/jd/${jdId}/candidate/${candidateId}/questions`),
+  // POST: it runs the matching + ranking pipeline (not a plain read).
+  rankCandidates: (jdId: string, topN?: number) =>
+    api.post<CandidateRankingResponse>(
+      `/recruiter/jd/${jdId}/rank-candidates`,
+      topN ? ({ top_n: topN } satisfies RankCandidatesRequest) : {}
+    ),
+
+  getQuestions: (jdId: string, candidateId: string) =>
+    api.get<RecruiterQuestionsResponse>(
+      `/recruiter/jd/${jdId}/questions/${candidateId}`
+    ),
 
   getRecommendation: (jdId: string, candidateId: string) =>
-    api.get(`/recruiter/jd/${jdId}/candidate/${candidateId}/recommendation`),
+    api.get<HiringRecommendationResponse>(
+      `/recruiter/jd/${jdId}/recommendation/${candidateId}`
+    ),
 };

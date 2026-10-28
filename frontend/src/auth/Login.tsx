@@ -5,6 +5,16 @@ import { authAPI } from '../services/api'
 import toast from 'react-hot-toast'
 import { Loader2, LogIn } from 'lucide-react'
 
+type Role = 'candidate' | 'recruiter'
+
+function resolveRole(fromServer?: string | null): Role {
+  const candidates = [fromServer, localStorage.getItem('user_role')]
+  for (const r of candidates) {
+    if (r === 'candidate' || r === 'recruiter') return r
+  }
+  return 'candidate'
+}
+
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,14 +31,15 @@ export default function Login() {
     setLoading(true)
     try {
       const res = await authAPI.login(email, password)
-      const { access_token, refresh_token } = res.data
+      const { access_token, refresh_token, role: serverRole } = res.data
 
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('refresh_token', refresh_token)
 
-      // Decode role from JWT payload (base64) to route correctly
-      JSON.parse(atob(access_token.split('.')[1]))
-      const role = fetchUserRole()
+      // The backend returns the account's role on login; it is the source of truth.
+      // (Older backends omit it — fall back to what Register stored.)
+      const role = resolveRole(serverRole)
+      localStorage.setItem('user_role', role)
 
       toast.success('Welcome back!')
       navigate(role === 'recruiter' ? '/recruiter' : '/candidate')
@@ -38,12 +49,6 @@ export default function Login() {
     } finally {
       setLoading(false)
     }
-  }
-
-  // Backend doesn't return role in token yet; ask the user or default to candidate.
-  // For now we just default to candidate dashboard and let the route system handle it.
-  const fetchUserRole = (): string => {
-    return localStorage.getItem('user_role') || 'candidate'
   }
 
   return (
