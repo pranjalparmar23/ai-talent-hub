@@ -1,0 +1,46 @@
+# ── MCP server registry ─────────────────────────────────────────────────────
+# The ONLY list of external MCP servers the app may call. A server or tool that is
+# not listed here is refused by the gateway.
+#
+# Rules
+#   • Secrets never go in this file. `api_key_env` is the NAME of an environment
+#     variable (UPPER_SNAKE_CASE) that holds the key.
+#   • `allowed_tools` is an allowlist. Keep it to read-only tools.
+#   • Plain http:// is accepted only with `internal: true` (servers we run ourselves
+#     inside the Docker network). Everything public must be https://.
+#   • `allowed_url_domains` lists the hosts a tool's URL *argument* may point at.
+#     Leave it empty for tools that take no URLs.
+#   • New servers start with `enabled: false` until they pass the Phase 6 vetting
+#     checklist (licence, maintenance, auth, rate limits, terms of service).
+#
+# Fields (defaults in brackets)
+#   transport             http | stdio          (stdio = local development only)
+#   url / url_env         server URL; url_env overrides it from the environment
+#   command               stdio only: ["npx", "-y", "some-server"]
+#   api_key_env           env var holding the key             [none]
+#   api_key_header        header name                         [Authorization]
+#   api_key_prefix        value prefix                        ["Bearer "]
+#   timeout_seconds       per attempt, connect + call         [10]
+#   max_retries           extra attempts after the first      [2]
+#   rate_limit_per_minute per server, per process             [30]
+#   cache_ttl_seconds     serve from cache without calling    [3600]
+#   stale_ttl_seconds     serve old data if the server fails  [86400]
+#   max_result_chars      longer results are cut              [20000]
+#   internal              self-hosted, private address OK     [false]
+#   enabled               false = never called                [true]
+
+servers:
+  # Our own small reference server (docker/mcp-demo, added later in Phase 6).
+  # It exists to test the gateway end to end with real streamable HTTP.
+  demo_reference:
+    transport: http
+    url: http://localhost:8100/mcp
+    url_env: MCP_DEMO_URL
+    internal: true
+    enabled: false
+    allowed_tools:
+      - search_reference_notes
+    timeout_seconds: 5
+    max_retries: 1
+    rate_limit_per_minute: 60
+    cache_ttl_seconds: 600
