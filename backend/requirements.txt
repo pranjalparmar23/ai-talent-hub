@@ -38,6 +38,10 @@ pypdf==4.3.1
 # ── Redis ────────────────────────────────────────────────────
 redis==5.0.8
 
+# ── MCP (Model Context Protocol) client + registry file ──────
+mcp==1.12.4
+PyYAML==6.0.2
+
 # ── Monitoring (LangSmith, optional) ─────────────────────────
 langsmith==0.1.143
 
