@@ -1,7 +1,13 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth_routes, candidate_routes, recruiter_routes, admin_routes
+from app.api import (
+    auth_routes,
+    candidate_routes,
+    recruiter_routes,
+    admin_routes,
+    health_routes,
+)
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.database.postgres import init_db
@@ -45,6 +51,7 @@ app.include_router(auth_routes.router, prefix="/api/auth", tags=["auth"])
 app.include_router(candidate_routes.router, prefix="/api/candidate", tags=["candidate"])
 app.include_router(recruiter_routes.router, prefix="/api/recruiter", tags=["recruiter"])
 app.include_router(admin_routes.router, prefix="/api/admin", tags=["admin"])
+app.include_router(health_routes.router, prefix="/api/health", tags=["health"])
 
 
 @app.get("/health", tags=["system"])
