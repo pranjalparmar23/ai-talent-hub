@@ -57,6 +57,34 @@ services:
       timeout: 10s
       retries: 3
 
+  # ── MCP demo server (development only) ───────────────────────
+  # Our own small MCP server for testing the MCPGateway end to end.
+  # It reuses the backend image (same pinned packages) and mounts server.py,
+  # so there is nothing extra to build or keep in sync.
+  # Not started by default. Start it with:
+  #   docker compose --profile demo up -d mcp-demo
+  # Then set `enabled: true` for demo_reference in backend/app/mcp/mcp_servers.yaml.
+  mcp-demo:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile
+    container_name: ath_mcp_demo
+    restart: unless-stopped
+    profiles: ["demo"]
+    ports:
+      # Bound to localhost only: reachable from your Mac, not from your network
+      - "127.0.0.1:8100:8100"
+    environment:
+      - MCP_DEMO_HOST=0.0.0.0
+    volumes:
+      - ./mcp-demo:/demo:ro
+    command: python /demo/server.py
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8100), 2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
   # ── FastAPI Backend ──────────────────────────────────────────
   backend:
     build:
@@ -74,6 +102,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
+      # Where the backend finds the demo MCP server (used only if it is enabled)
+      - MCP_DEMO_URL=http://mcp-demo:8100/mcp
     depends_on:
       postgres:
         condition: service_healthy
