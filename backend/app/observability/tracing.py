@@ -21,9 +21,9 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 # ── Environments and projects ────────────────────────────────
 
 PROJECT_NAMES = {
-    "dev": "talent-hub-dev",
-    "ci": "talent-hub-ci",
-    "prod": "talent-hub-prod",
+    "dev": "talent-hub-development",
+    "ci": "talent-hub-staging",
+    "prod": "talent-hub-production",
 }
 
 _ENV_ALIASES = {

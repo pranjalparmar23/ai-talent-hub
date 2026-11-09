@@ -276,7 +276,7 @@ def test_config_warnings_for_a_good_dev_setup():
         **DEV,
         "LANGCHAIN_TRACING_V2": "true",
         "LANGCHAIN_API_KEY": "present",
-        "LANGCHAIN_PROJECT": "talent-hub-dev",
+        "LANGCHAIN_PROJECT": "talent-hub-development",
     }
     assert t.config_warnings(environ) == []
 
@@ -284,7 +284,7 @@ def test_config_warnings_for_a_good_dev_setup():
 def test_config_warnings_flag_the_old_project_name_and_missing_key():
     warnings = t.config_warnings({**DEV, "LANGCHAIN_TRACING_V2": "true"})
     assert any("no LangSmith API key" in w for w in warnings)
-    assert any("expected 'talent-hub-dev'" in w for w in warnings)
+    assert any("expected 'talent-hub-development'" in w for w in warnings)
 
 
 def test_config_warnings_flag_visible_content_in_production():
@@ -292,7 +292,7 @@ def test_config_warnings_flag_visible_content_in_production():
         **PROD,
         "LANGCHAIN_TRACING_V2": "true",
         "LANGCHAIN_API_KEY": "present",
-        "LANGCHAIN_PROJECT": "talent-hub-prod",
+        "LANGCHAIN_PROJECT": "talent-hub-production",
     }
     warnings = t.config_warnings(environ)
     assert len(warnings) == 1
@@ -304,7 +304,7 @@ def test_config_warnings_clean_production_setup():
         **PROD,
         "LANGCHAIN_TRACING_V2": "true",
         "LANGCHAIN_API_KEY": "present",
-        "LANGCHAIN_PROJECT": "talent-hub-prod",
+        "LANGCHAIN_PROJECT": "talent-hub-production",
         "LANGSMITH_HIDE_INPUTS": "true",
         "LANGSMITH_HIDE_OUTPUTS": "true",
         "LANGSMITH_TRACING_SAMPLING_RATE": "0.1",
@@ -317,7 +317,7 @@ def test_config_warnings_flag_missing_hash_secret_and_bad_rate():
         "APP_ENV": "production",
         "LANGCHAIN_TRACING_V2": "true",
         "LANGCHAIN_API_KEY": "present",
-        "LANGCHAIN_PROJECT": "talent-hub-prod",
+        "LANGCHAIN_PROJECT": "talent-hub-production",
         "LANGSMITH_HIDE_INPUTS": "true",
         "LANGSMITH_HIDE_OUTPUTS": "true",
         "LANGSMITH_TRACING_SAMPLING_RATE": "ten percent",

@@ -31,17 +31,17 @@ Every number above can change. Confirm the plan numbers on LangSmith's **Usage a
 
 ## Environments and projects
 
-`APP_ENV` already exists (`development`, `production`). Each environment traces into its own LangSmith project, set with `LANGCHAIN_PROJECT` in that environment's `.env`.
+`APP_ENV` already exists (`development`, `production`). LangSmith now groups traces by **agent** and **environment**. We have one agent, `AI Talent Hub` (ID `talent-hub`). Each environment traces into its own project, named `<agent ID>-<environment>` and set with `LANGCHAIN_PROJECT` in that environment's `.env`. Confirmed on 2026-11-09 for development: `LANGCHAIN_PROJECT=talent-hub-development` appears under the Development environment with the pinned `langsmith 0.1.143`. The staging and production names follow LangSmith's naming rule but have not been tested. LangSmith has no CI environment, so `staging` is the reserved name for CI and eval runs.
 
 | Environment | Project | Tracing | Content in traces | Data allowed |
 |---|---|---|---|---|
-| development (`APP_ENV=development`) | `talent-hub-dev` | On, sample rate 1.0 | Inputs and outputs visible, anonymizer on | Synthetic data or your own; never another person's resume or transcript |
-| CI | `talent-hub-ci` (reserved) | **Off** (`LANGCHAIN_TRACING_V2=false`, already set in `ci.yml`) | n/a | Synthetic only |
-| Eval runs (Phase 10) | `talent-hub-ci` | On, on demand only | Visible | Golden-set data only (synthetic) |
-| production (`APP_ENV=production`) | `talent-hub-prod` | On, sample rate starts at 0.1 | **Hidden** (inputs and outputs) | Real users |
+| development (`APP_ENV=development`) | `talent-hub-development` | On, sample rate 1.0 | Inputs and outputs visible, anonymizer on | Synthetic data or your own; never another person's resume or transcript |
+| CI | `talent-hub-staging` (reserved) | **Off** (`LANGCHAIN_TRACING_V2=false`, already set in `ci.yml`) | n/a | Synthetic only |
+| Eval runs (Phase 10) | `talent-hub-staging` | On, on demand only | Visible | Golden-set data only (synthetic) |
+| production (`APP_ENV=production`) | `talent-hub-production` | On, sample rate starts at 0.1 | **Hidden** (inputs and outputs) | Real users |
 
 Notes:
-- Older names (`talent-ai` in `.env.example`, `ai-talent-hub` in the README) are replaced by the `talent-hub-<env>` scheme.
+- Older names (`talent-ai` in `.env.example`, `ai-talent-hub` in the README) are replaced by the `talent-hub-<environment>` scheme (`development`, `staging`, `production`).
 - The monthly cap is for the account, not per project, so dev, eval and prod share the same 5,000 traces.
 - **Production traces carry shape, not content:** which agent ran, which model, how long, how many tokens, whether it failed, tags and hashed ids. That is what monitoring needs, and it means a trace can never leak a resume. Turning content on in production for debugging requires a deliberate, time-boxed decision recorded in the pull request.
 
@@ -109,16 +109,16 @@ A trace may identify a user only as `user_hash`: an HMAC-SHA256 of the user id w
 2. Graphs set `run_name="graph.<name>"`.
 3. The gateway adds MCP metadata (rule 5) to the parent run.
 4. Production sets the hide-inputs and hide-outputs variables; development builds a `Client` with the anonymizer from `tracing.py`.
-5. Open question to settle then: how to attach that anonymizer `Client` to LangChain's automatic tracer in `langsmith 0.1.143`. The masking guide does not show it for LangChain, so verify with a test trace before relying on it. Until verified, treat development traces as unmasked and use synthetic data only.
+Verified 2026-11-09: with `@traceable(client=build_client())`, an email in the input was masked in LangSmith. This is still unverified for LangChain's automatic tracer.
 
 ## Manual setup (you do this in LangSmith)
 
 - [ ] Create or open your LangSmith account (Developer plan, one seat).
-- [ ] Create three projects: `talent-hub-dev`, `talent-hub-ci`, `talent-hub-prod`.
+- [ ] Create one agent: name `AI Talent Hub`, ID `talent-hub` (the ID cannot be changed). Development is confirmed working. Check the Production environment view when production tracing is first turned on.
 - [ ] Create an API key. **Regenerate any key that has been pasted into a chat or committed.** Keep keys in each environment's `.env` only.
 - [ ] Set `LANGCHAIN_PROJECT` per environment as in the table above.
 - [ ] Under Settings > Usage and Billing, set the monthly trace usage limit below 5,000. **Do not add a payment method.**
-- [ ] Run one dev request, confirm a trace appears in `talent-hub-dev`, and read the Usage page to see how it was counted.
+- [ ] Run one dev request, confirm a trace appears in `talent-hub-development`, and read the Usage page to see how it was counted.
 - [ ] Update tracker row 19 with the confirmed limits.
 
 ## Open decisions
