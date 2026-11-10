@@ -83,6 +83,66 @@ class VectorStore:
         return ids
 
     @classmethod
+    def upsert_documents(
+        cls,
+        collection_name: str,
+        documents: list[str],
+        embeddings: list[list[float]],
+        metadatas: list[dict],
+        ids: list[str],
+    ) -> list[str]:
+        """Insert chunks, or overwrite them when the id already exists.
+
+        Unlike add_documents, the ids are required: the ingest pipeline gives
+        every chunk a fixed id, so loading the same content twice changes nothing.
+        """
+        if not (len(documents) == len(embeddings) == len(metadatas) == len(ids)):
+            raise ValueError(
+                "documents, embeddings, metadatas and ids must be the same length"
+            )
+        if not ids:
+            return []
+
+        collection = cls._get_collection_by_name(collection_name)
+        collection.upsert(
+            ids=ids,
+            documents=documents,
+            embeddings=embeddings,
+            metadatas=metadatas,
+        )
+        return ids
+
+    @classmethod
+    def get_by_where(cls, collection_name: str, where: dict) -> list[dict]:
+        """Every chunk matching a filter, as id and metadata (no text, no vectors)."""
+        collection = cls._get_collection_by_name(collection_name)
+        result = collection.get(where=where, include=["metadatas"])
+        ids = result.get("ids") or []
+        metas = result.get("metadatas") or [None] * len(ids)
+        return [{"id": i, "metadata": m or {}} for i, m in zip(ids, metas)]
+
+    @classmethod
+    def update_metadatas(
+        cls, collection_name: str, ids: list[str], metadatas: list[dict]
+    ) -> int:
+        """Change the metadata of existing chunks. Text and vectors stay as they are."""
+        if len(ids) != len(metadatas):
+            raise ValueError("ids and metadatas must be the same length")
+        if not ids:
+            return 0
+        collection = cls._get_collection_by_name(collection_name)
+        collection.update(ids=ids, metadatas=metadatas)
+        return len(ids)
+
+    @classmethod
+    def delete_ids(cls, collection_name: str, ids: list[str]) -> int:
+        """Delete chunks by id. Returns how many ids were asked for."""
+        if not ids:
+            return 0
+        cls._get_collection_by_name(collection_name).delete(ids=ids)
+        return len(ids)
+
+    @classmethod
     def query(
         cls,
         collection_name: str,
