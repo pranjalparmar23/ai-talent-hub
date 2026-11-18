@@ -138,7 +138,7 @@ _ADMONITION = re.compile(r"^:::.*$", re.MULTILINE)
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _FENCED_CODE = re.compile(r"(```.*?```)", re.DOTALL)
 # [text](url), where the text may hold `code` and one level of [brackets]
-_LINK = re.compile(r"\[((?:[^\[\]]|\[[^\]]*\])+)\]\([^)]*\)")
+_LINK_OR_CODE = re.compile(r"(`[^`\n]+`)|\[((?:[^\[\]]|\[[^\]]*\])+)\]\([^)]*\)")
 _MANY_BLANK_LINES = re.compile(r"\n{3,}")
 
 
@@ -174,6 +174,11 @@ def _strip_mdx(prose: str) -> str:
     prose = _HTML_TAG.sub("", prose)
     prose = _ADMONITION.sub("", prose)
     return _IMAGE.sub("", prose)
+
+
+def _strip_links(prose: str) -> str:
+    """[text](url) becomes text. Inline code is left as written."""
+    return _LINK_OR_CODE.sub(lambda m: m.group(1) or m.group(2), prose)
 
 
 def _blocks(text: str) -> list[str]:
@@ -253,7 +258,7 @@ def clean_page(body: str) -> tuple[str, int]:
     """Plain text for one page, and how many promotional items were removed."""
     body = _outside_code(body, _strip_mdx)
     blocks, removed = _drop_promotional(_blocks(body))
-    blocks = [_outside(_FENCED_CODE, b, lambda p: _LINK.sub(r"\1", p)) for b in blocks]
+    blocks = [_outside(_FENCED_CODE, b, _strip_links) for b in blocks]
     blocks = _drop_empty_headings(blocks)
     text = _MANY_BLANK_LINES.sub("\n\n", "\n\n".join(blocks)).strip()
     return text, removed
