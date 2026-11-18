@@ -1,0 +1,264 @@
+# Link-only source: roadmap.sh (kamranahmedse/developer-roadmap)
+#
+# roadmap.sh's licence (read 2026-11-18) says the content is protected by copyright
+# and that only LINKS to the repository or website may be shared. So we store only
+# a link, a title and a short description written by us. We copy nothing from the
+# roadmaps themselves: no topic lists, no images, no text.
+#
+# Every address was checked against the repository's roadmap folders on 2026-11-18
+# (commit 16ea08c). The link-health check (Phase 7, task 12) tests them on the live
+# site. Keep each description to one plain sentence about the role or skill.
+
+source_id: roadmap-sh
+site: https://roadmap.sh
+licence: proprietary
+attribution: "roadmap.sh by Kamran Ahmed. Link only: no content is copied."
+content_type: roadmap
+
+entries:
+  - url: https://roadmap.sh/backend
+    title: "Backend Developer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for becoming a backend developer: building servers, databases and APIs that other software depends on."
+  - url: https://roadmap.sh/frontend
+    title: "Frontend Developer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for becoming a frontend developer: building the pages and interfaces people see and use in the browser."
+  - url: https://roadmap.sh/full-stack
+    title: "Full Stack Developer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for working across both the browser side and the server side of a web product."
+  - url: https://roadmap.sh/devops
+    title: "DevOps Engineer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for DevOps work: building, shipping, running and monitoring software reliably."
+  - url: https://roadmap.sh/qa
+    title: "QA Engineer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for software testing and quality assurance roles."
+  - url: https://roadmap.sh/android
+    title: "Android Developer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for building apps for Android phones and tablets."
+  - url: https://roadmap.sh/ios
+    title: "iOS Developer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for building apps for iPhone and iPad."
+  - url: https://roadmap.sh/software-architect
+    title: "Software Architect roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: senior
+    summary: "A learning path for designing how large software systems are structured and how their parts fit together."
+  - url: https://roadmap.sh/system-design
+    title: "System Design roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A guide to the ideas behind designing large systems, often used to prepare for system design interviews."
+  - url: https://roadmap.sh/api-design
+    title: "API Design roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for designing clear, safe and easy-to-use programming interfaces."
+  - url: https://roadmap.sh/cyber-security
+    title: "Cyber Security roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for security roles: protecting systems, networks and data."
+  - url: https://roadmap.sh/engineering-manager
+    title: "Engineering Manager roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: senior
+    summary: "A learning path for moving into managing software engineering teams."
+  - url: https://roadmap.sh/datastructures-and-algorithms
+    title: "Data Structures and Algorithms roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for the data structures and algorithms that coding interviews are built around."
+  - url: https://roadmap.sh/computer-science
+    title: "Computer Science roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A broad learning path through the core subjects of a computer science education."
+  - url: https://roadmap.sh/git-github
+    title: "Git and GitHub roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for tracking code changes with Git and working with others on GitHub."
+  - url: https://roadmap.sh/python
+    title: "Python roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for the Python programming language."
+  - url: https://roadmap.sh/javascript
+    title: "JavaScript roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for the JavaScript programming language."
+  - url: https://roadmap.sh/typescript
+    title: "TypeScript roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for TypeScript, JavaScript with types."
+  - url: https://roadmap.sh/java
+    title: "Java roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for the Java programming language."
+  - url: https://roadmap.sh/golang
+    title: "Go roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for the Go programming language."
+  - url: https://roadmap.sh/react
+    title: "React roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for building user interfaces with React."
+  - url: https://roadmap.sh/nodejs
+    title: "Node.js roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for writing server-side programs with Node.js."
+  - url: https://roadmap.sh/sql
+    title: "SQL roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for querying and managing data in relational databases with SQL."
+  - url: https://roadmap.sh/postgresql-dba
+    title: "PostgreSQL roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for running and tuning PostgreSQL databases."
+  - url: https://roadmap.sh/docker
+    title: "Docker roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for packaging and running software in containers with Docker."
+  - url: https://roadmap.sh/kubernetes
+    title: "Kubernetes roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for running containers at scale with Kubernetes."
+  - url: https://roadmap.sh/aws
+    title: "AWS roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for building and running systems on Amazon Web Services."
+  - url: https://roadmap.sh/linux
+    title: "Linux roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for using and administering Linux systems."
+  - url: https://roadmap.sh/ai-engineer
+    title: "AI Engineer roadmap"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A learning path for building products on top of AI models."
+  - url: https://roadmap.sh/prompt-engineering
+    title: "Prompt Engineering roadmap"
+    domain: software-engineering
+    role_family: all
+    level: all
+    summary: "A learning path for writing clear instructions that get useful answers from AI models."
+  - url: https://roadmap.sh/machine-learning
+    title: "Machine Learning roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for machine learning: teaching computers to find patterns in data."
+  - url: https://roadmap.sh/ai-data-scientist
+    title: "AI and Data Scientist roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for data science roles that combine statistics, programming and AI."
+  - url: https://roadmap.sh/data-analyst
+    title: "Data Analyst roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for analysing data and explaining what it shows."
+  - url: https://roadmap.sh/data-engineer
+    title: "Data Engineer roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for building the pipelines that move and prepare data."
+  - url: https://roadmap.sh/bi-analyst
+    title: "BI Analyst roadmap"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A learning path for business intelligence work: turning company data into reports and dashboards."
+  - url: https://roadmap.sh/product-manager
+    title: "Product Manager roadmap"
+    domain: product
+    role_family: non_technical
+    level: all
+    summary: "A learning path for product management: deciding what to build and why."
+  - url: https://roadmap.sh/product-design
+    title: "Product Design roadmap"
+    domain: design
+    role_family: non_technical
+    level: all
+    summary: "A learning path for designing digital products, from ideas to finished screens."
+  - url: https://roadmap.sh/ux-design
+    title: "UX Design roadmap"
+    domain: design
+    role_family: non_technical
+    level: all
+    summary: "A learning path for user experience design: making products easy and pleasant to use."
+  - url: https://roadmap.sh/technical-writer
+    title: "Technical Writer roadmap"
+    domain: general
+    role_family: non_technical
+    level: all
+    summary: "A learning path for writing clear documentation and guides for technical products."
+  - url: https://roadmap.sh/devrel
+    title: "Developer Relations roadmap"
+    domain: general
+    role_family: non_technical
+    level: all
+    summary: "A learning path for developer relations: helping developers adopt and succeed with a product."
+  - url: https://roadmap.sh/seo
+    title: "SEO roadmap"
+    domain: marketing
+    role_family: non_technical
+    level: all
+    summary: "A learning path for search engine optimisation: helping people find a website through search."
