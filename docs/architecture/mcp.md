@@ -2,7 +2,7 @@
 
 How the backend talks to external MCP (Model Context Protocol) servers, why it is built this way, and the rules for adding a server.
 
-**Tracker:** Phase 6, tasks 6 (client approach), 7, 8, 10, 11, 12, 13. Decision references: D2, D3.
+**Tracker:** Phase 6, tasks 6 (client approach), 7, 8, 10, 11, 12, 13; Phase 7, task 6 (section 10). Decision references: D2, D3.
 
 ## 1. What MCP is used for
 
@@ -165,13 +165,23 @@ The YAML file's header comment lists every field and its default. Key rules:
 
 ## 9. Testing (task 12)
 
-`tests/unit/mcp/` contains 69 tests and needs no network. `fake_server.py` is a real FastMCP server connected to the real client session through in-memory streams, so the protocol code runs for real. It has tools for the awkward cases: huge output, errors, slow responses, hostile text, control characters and URL arguments.
+`tests/unit/mcp/` contains 87 tests and needs no network. `test_extract_text.py` covers text in embedded resources and reads a file through the gateway from an in-memory server that answers like the GitHub server. `fake_server.py` is a real FastMCP server connected to the real client session through in-memory streams, so the protocol code runs for real. It has tools for the awkward cases: huge output, errors, slow responses, hostile text, control characters and URL arguments.
 
 `FakeServerKit` counts sessions opened (to prove the cache answered) and has switches for connection failures and a server that is always down.
 
-## 10. What comes next
+## 10. Reading repository files for ingestion (Phase 7)
+
+The Phase 7 source adapters read files from public GitHub repositories through the gateway, using the GitHub MCP server's `get_file_contents` tool. The code is `GatewayGitHubReader` in `app/ingest/sources/readers.py`.
+
+- **Registry entry:** `github` in `mcp_servers.yaml`. It is **disabled** by default. It runs the official image with `--read-only --toolsets repos`, allows only `get_file_contents`, and takes its token from `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env` (a read-only, fine-grained token). Enable it only for an ingest run.
+- **Embedded resources:** the server returns file text inside an embedded resource, not as plain text. `_extract_text` in `gateway.py` keeps that text. Images and binary data are still ignored.
+- **Stricter than other callers:** ingestion must not store a wrong answer, so the reader refuses a failed call, an answer served from `stale_cache` (it would get today's date), a result the gateway cut at `max_result_chars` (the `github` entry allows 200000), and an empty reply.
+- **Licence first:** the adapter reads the repository's `LICENSE` file before any page, and stops if it is not what the vetting log expects.
+- **Not yet proven on the real server:** the image tag, the `stdio` subcommand, the response shape and the folder-listing format are checked only against an in-memory server. Confirm them on the first real run. Stdio is refused in production, so ingestion runs from a development or CI machine until the server is hosted over HTTP.
+
+## 11. What comes next
 
 - **Phase 6 spike:** vet candidate servers and data sources; nothing is enabled until it passes.
-- **Phase 7:** the RAG rebuild becomes the first real caller of the gateway.
+- **Phase 7:** the RAG rebuild is the first real caller of the gateway. The source adapters (task 6, section 10) are built; the live-lookup fallback (task 10) comes next.
 - **Phase 11:** injection detection on MCP output and guardrails on what reaches prompts.
 - **Phase 12:** gateway metrics (calls, cache hit rate, circuit state) on the monitoring dashboard.
