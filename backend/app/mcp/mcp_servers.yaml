@@ -44,3 +44,38 @@ servers:
     max_retries: 1
     rate_limit_per_minute: 60
     cache_ttl_seconds: 600
+
+  # GitHub MCP server, read-only. Phase 7 ingestion uses it ONLY to read files from
+  # public repositories whose licence has been checked (docs/mcp/vetting-log.md:
+  # "run with --read-only and --toolsets repos only").
+  #   • Local development: Docker over stdio, token from GITHUB_PERSONAL_ACCESS_TOKEN
+  #     (a fine-grained, read-only token for public repos). The gateway refuses stdio
+  #     when APP_ENV=production; hosting it over HTTP is still an open follow-up.
+  #   • The image tag is pinned. Read the v2 notes before changing it.
+  #   • Turn it on only when you run an ingest: set `enabled: true`.
+  #   • Sized for ingestion: Handbook pages reach about 25,000 characters and a
+  #     folder listing is longer, so max_result_chars is raised; 60 s covers the
+  #     container start; 120 calls a minute covers about 50 pages plus folders.
+  github:
+    transport: stdio
+    command:
+      - docker
+      - run
+      - "-i"
+      - "--rm"
+      - "-e"
+      - GITHUB_PERSONAL_ACCESS_TOKEN
+      - "ghcr.io/github/github-mcp-server:v1.14.0"
+      - stdio
+      - "--read-only"
+      - "--toolsets"
+      - repos
+    api_key_env: GITHUB_PERSONAL_ACCESS_TOKEN
+    enabled: false
+    allowed_tools:
+      - get_file_contents
+    timeout_seconds: 60
+    max_retries: 1
+    rate_limit_per_minute: 120
+    cache_ttl_seconds: 300
+    max_result_chars: 200000

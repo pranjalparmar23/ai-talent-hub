@@ -175,8 +175,21 @@ def _classify(exc: BaseException) -> tuple[str, bool]:
 
 
 def _extract_text(result) -> str:
-    """Pull text out of a CallToolResult. Images / resources are ignored on purpose."""
-    parts = [c.text for c in result.content if getattr(c, "type", None) == "text"]
+    """Pull text out of a CallToolResult.
+
+    Plain text items are kept, and so is the text inside an embedded resource: the
+    GitHub server sends file contents that way. Images and binary (blob) resources
+    are ignored on purpose.
+    """
+    parts = []
+    for item in result.content:
+        kind = getattr(item, "type", None)
+        if kind == "text":
+            parts.append(item.text)
+        elif kind == "resource":
+            text = getattr(getattr(item, "resource", None), "text", None)
+            if isinstance(text, str):
+                parts.append(text)
     text = "\n".join(parts).strip()
     if not text and getattr(result, "structuredContent", None):
         text = json.dumps(result.structuredContent, ensure_ascii=False)
