@@ -17,15 +17,15 @@ Verdicts for external MCP servers and content sources, following `docs/mcp/vetti
 | 6 | Firecrawl MCP | 7 | **reject** (for now; redundant with Fetch) |
 | 7 | Brave Search MCP | 7 | **approve-live-only** (no retention allowed) |
 | 7 | Tavily MCP | 7 | **approve-live-only** (backup; `tavily_search` only) |
-| 8 | GitHub MCP server | 7 | **approve-live-only** (read-only mode) |
+| 8 | GitHub MCP server | 7 | **approve-live-only** (read-only mode). Also reads repository files for ingestion from licence-checked repos (disabled entry added 2026-11-18) |
 | 9 | Context7 MCP | 7 | **reject** (for now; low fit, limits not found) |
 | 10 | Wikipedia MCP (community) | 7 | **reject** the server; Wikipedia content stays **link-only** until its licence is read |
 | 11 | LeetCode MCP servers | 7 | **reject** |
 | 12 | YouTube transcript MCP | 7 | **reject** |
 | 13 | "Interview Prep MCP" (lightcube-labs) | 7 | **reject** (no source found) |
-| 14 | Tech Interview Handbook | 7 | **approve-ingest** (MIT; confirm the LICENSE file at ingest) |
+| 14 | Tech Interview Handbook | 7 | **approve-ingest** (MIT; LICENSE file read 2026-11-18, and the adapter re-checks it on every run) |
 | 14 | system-design-primer | 7 | **approve-link-only** |
-| 14 | roadmap.sh developer-roadmap | 7 | **approve-link-only** |
+| 14 | roadmap.sh developer-roadmap | 7 | **approve-link-only** (licence file read 2026-11-18: links only) |
 | 14 | freeCodeCamp | 7 | **approve-link-only** |
 | 15 | O*NET Web Services | 9 | **approve-live-only**, with conditions (permission needed) |
 | 16 | ESCO web service API | 9 | **reject** (for now; no data licence found) |
@@ -39,7 +39,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 2. **Brave does not allow retaining results on its search plans.** The gateway cache keeps results in memory. `cache_ttl_seconds: 0` plus `stale_ttl_seconds: 0` makes the entry expire immediately, but the gateway still writes it and removes it on the next lookup. If we want strict no-retention, add a `cache: false` option to the registry. Decide before enabling Brave.
 3. **O*NET terms say registration-required apps need the Center's permission** unless a free, public version exists. Talent Hub has logins. Ask for permission, or confirm that a public view covers it, before enabling.
 4. **Production needs HTTP.** The gateway refuses `stdio` in production. Fetch and GitHub are shown above with stdio-style packages. Whether each ships a streamable-HTTP mode was not verified. Plan to run them as self-hosted containers (`internal: true`) or use a hosted endpoint.
-5. **Things this session could not read** (marked *unverified* below): LeetCode terms, Wikimedia reuse terms, GitHub API rate limits, Firecrawl robots.txt behaviour, Context7 request limits, the ESCO data licence, and the LICENSE files of three repos.
+5. **Things this session could not read** (marked *unverified* below): LeetCode terms, Wikimedia reuse terms, GitHub API rate limits, Firecrawl robots.txt behaviour, Context7 request limits, the ESCO data licence, and the LICENSE files of the content repos. The Tech Interview Handbook and roadmap.sh licence files were read on 2026-11-18 (see their records); the others are still unread.
 
 ---
 
@@ -131,6 +131,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Risks found: the default toolsets include write-capable tools; issue and pull-request text from strangers is untrusted data (prompt injection).
 - Verdict: approve-live-only
 - Conditions: run with `--read-only` and `--toolsets repos` only; `allowed_tools` limited to file and repo read tools; read-only fine-grained token in `.env`; ingest only from repos whose licence has been checked; v2 differences reviewed before pinning.
+- Status (2026-11-18): a **disabled** `github` entry is in `mcp_servers.yaml` (Docker image `ghcr.io/github/github-mcp-server:v1.14.0`, `--read-only --toolsets repos`, `allowed_tools: [get_file_contents]`, token from `GITHUB_PERSONAL_ACCESS_TOKEN`). The Tech Interview Handbook adapter reads files through it. **Still unverified:** the image tag and `stdio` subcommand, the exact response shape (the file text arrives in an embedded resource, which the gateway now keeps), and the folder-listing format. Stdio is refused in production, so ingest runs from a development or CI machine until an HTTP deployment exists. Confirm all of this on the first real run.
 - Re-review by: 2027-02-09
 
 ### Context7 MCP — 2026-11-09
@@ -209,7 +210,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Type: data source (GitHub repository)
 - Offers: coding interview preparation guides.
 - Links (accessed 2026-11-09): [ecosyste.ms index](https://awesome.ecosyste.ms/projects/github.com%2Fyangshun%2Ftech-interview-handbook) (index)
-- Rights: MIT per the index. The LICENSE file itself was not read (unverified). MIT requires keeping the copyright and licence notice.
+- Rights: MIT. The LICENSE file was read on 2026-11-18 (copy at commit e1d28e8): "MIT License", "Copyright (c) 2017-Present Yangshun Tay", standard grant. MIT requires keeping the copyright and licence notice (see `docs/attribution.md`). The adapter re-reads the file on every run and stops if it is no longer MIT.
 - Maintenance: owner yangshun; about 126k stars. The index shows last push 2025-04-28 but was last synced 2025-05-05, so current activity is unknown.
 - Tools: n/a
 - Data sent / auth: none (public repo).
@@ -218,6 +219,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Risks found: age of content; promotional links; coverage gap.
 - Verdict: approve-ingest
 - Conditions: read the LICENSE file at ingest time; store source name, URL, licence and access date with every chunk; include the MIT notice in an attribution file; skip promotional content; run the link-health check.
+- Status (2026-11-18): met in code except the link-health check. The LICENSE is checked on every run, the credit line is stored with every chunk, promotional content is removed (on the checked copy: 45 promotional items across 12 pages, plus 3 pages skipped outright and a template file), and the notice is in `docs/attribution.md`. The link-health check is Phase 7, task 12.
 - Re-review by: 2027-02-09
 
 ### system-design-primer (`donnemartin/system-design-primer`) — 2026-11-09
@@ -239,15 +241,16 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Type: data source (GitHub repository)
 - Offers: role-based learning roadmaps.
 - Links (accessed 2026-11-09): [ecosyste.ms index](https://awesome.ecosyste.ms/projects/github.com%2Fkamranahmedse%2Fdeveloper-roadmap) (index)
-- Rights: listed as "other" (a custom licence file). **The file was not read**, so its terms are unknown.
+- Rights: custom licence file, read on 2026-11-18 (primary, copy at commit 16ea08c). It says the text and images are protected by copyright, that personal use is allowed, that **links** to the repository or roadmap.sh may be shared, and that any other use of the content needs prior consent. Copyright "© 2017 - Present. Kamran Ahmed".
 - Maintenance: the index shows a last push in 2025-05 but another entry cites 2026-02; current activity unverified.
 - Tools: n/a
 - Data sent / auth: none.
 - Limits and cost: n/a
-- Quality and coverage: technical roles.
-- Risks found: custom licence, unknown terms.
+- Quality and coverage: mostly technical roles, with a few non-technical ones (product, design, writing, SEO).
+- Risks found: restrictive custom licence. Our own descriptions must not copy or closely follow the roadmaps' text.
 - Verdict: approve-link-only
-- Conditions: link and short own-words summary only; read the licence file before any ingest.
+- Conditions: link and short own-words summary only; never fetch or store the roadmaps' content. Licence file read (see Rights).
+- Status (2026-11-18): done. 41 links with descriptions written by us are in `backend/app/ingest/sources/data/roadmap_sh.yaml` (Phase 7, task 6). The addresses match the repository's roadmap folders; the live pages are checked by the link-health task.
 - Re-review by: 2027-02-09
 
 ### freeCodeCamp — 2026-11-09

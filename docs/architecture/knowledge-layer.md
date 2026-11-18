@@ -1,9 +1,9 @@
 # Knowledge Layer Design
 
-How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout and the embedding model. The pipeline that fills it is described in later tasks.
+How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, and how the pipeline, the licence gate and the source adapters fill the collections.
 
-**Tracker:** Phase 7, tasks 2, 3 and 4. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. Nothing in the app uses it yet; tasks 5 to 12 build on it.
+**Tracker:** Phase 7, tasks 2 to 7. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate and two source adapters are built and unit tested (updated 2026-11-18). The tests use fakes: the first run against the real GitHub server and ChromaDB comes with task 8. No agent reads the new collections yet (tasks 9 and 11).
 
 ---
 
@@ -15,6 +15,8 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 2 | Collections | Two new collections, `interview_knowledge` and `learning_knowledge`, filtered by metadata. `skills_taxonomy` is reserved for Phase 9 |
 | 3 | Embedding model | **Keep `all-MiniLM-L6-v2` (English only).** Decided 2026-11-10 |
 | 4 | Old data | Not migrated. It stays in the local snapshot and is deleted in task 15 after the new evaluation passes |
+| 5 | Licence policy | Allowlist of permissive licences for full text. Share-alike, unknown and restrictive licences are refused. Restrictive sources are link-only |
+| 6 | Where content comes from | One adapter per source. Pilot: Tech Interview Handbook (full text) and roadmap.sh (link only) |
 
 ---
 
@@ -32,7 +34,7 @@ Facts from the repo and the snapshot taken on 2026-11-10:
 
 ## Decision 1: `KnowledgeDoc` and chunk metadata (task 2)
 
-A **`KnowledgeDoc`** is one source page or file after fetching and cleaning. It is split into chunks, and every chunk carries the document's fields so that search results can show a source without a second lookup.
+A **`KnowledgeDoc`** is one source page or file after fetching and cleaning. It is split into chunks, and every chunk carries the document's fields so that search results can show a source without a second lookup. The code is `app/ingest/schema.py`.
 
 ### Document fields
 
@@ -69,17 +71,21 @@ Every document field except `text` and the ISO times, plus:
 ### Rules
 
 1. **Deterministic IDs.** Chunk id is `<doc_id>:<chunk_index as 4 digits>`. The same content always gets the same ids, so loading twice changes nothing.
-2. **Idempotent updates.** Same `content_hash`: skip. Changed hash: delete all chunks with that `doc_id`, then add the new ones. Past `expires_at`: delete. Every run logs added, updated, skipped and expired counts.
+2. **Idempotent updates.**
+   - Same `content_hash` and same chunk ids: nothing is re-embedded, but the dates and credit line are refreshed, so content that was just re-checked does not expire.
+   - Changed hash: the new chunks are written first, then the old ids that are no longer part of the document are deleted. A failure half way leaves the old content, not nothing.
+   - A document whose `content_type` moves it to the other collection is removed from the old collection after the new write succeeds.
+   - Past `expires_at`: delete (task 8).
 3. **The hash includes the embedding model and chunk settings,** so changing either forces a re-embed.
 4. **Flat values only,** and missing values are left out.
 5. **Public content only.** Resumes, interview answers and anything from a user never go into these collections.
-6. **No licence, no ingest.** A document without a recorded licence and attribution is refused (task 7).
+6. **No licence, no ingest.** A document without a recorded licence and attribution is refused by the licence gate (Decision 4).
 
 ---
 
 ## Decision 2: collections (task 3)
 
-Five topic-based collections are replaced by two content-based ones. Topic, role and level become filters, so adding a new domain needs no new collection.
+Five topic-based collections are replaced by two content-based ones. Topic, role and level become filters, so adding a new domain needs no new collection. The code is `app/rag/collections.py`; the old five stay listed there as legacy until task 15.
 
 | Collection | Holds | `content_type` values |
 |---|---|---|
@@ -113,13 +119,85 @@ What follows from it:
 
 ---
 
+## Decision 4: pipeline, licence gate and source adapters (tasks 5, 6, 7)
+
+Three parts, each with one job:
+
+```
+source adapter  ->  licence gate  ->  pipeline  ->  ChromaDB
+(fetch + clean)    (may we store it?)  (chunk, embed, write)
+```
+
+### The pipeline (task 5)
+
+Code: `app/ingest/pipeline.py`. Chunks are 500 characters with 50 overlap. For each document it:
+
+1. runs the licence gate (a refused document is reported, never stored);
+2. fingerprints the text and how it is embedded (`content_hash`);
+3. looks at what is already stored for the document;
+4. writes new or changed chunks with fixed ids, or only refreshes the dates and credit line when nothing changed;
+5. deletes chunks that are no longer part of the document.
+
+Each document ends with one status:
+
+| Status | Meaning |
+|---|---|
+| `added` | New document written |
+| `updated` | Content changed and was rewritten |
+| `unchanged` | Same content; only the dates and credit line were refreshed |
+| `refused` | The licence gate said no. This is not a failure |
+| `skipped` | No text to store |
+| `failed` | An error. The run goes on with the next document |
+
+A run is `ok` unless a document `failed`. The collections must exist first (`python scripts/init_chroma.py`). The pipeline uses four `VectorStore` methods added for it: `upsert_documents`, `get_by_where`, `update_metadatas` and `delete_ids`. The older methods are unchanged.
+
+### The licence gate (task 7)
+
+Code: `app/ingest/licence.py`. The rule is "no licence, no ingest".
+
+| Licence | Full text | Link only |
+|---|---|---|
+| MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense, CC0-1.0, CC-BY-3.0, CC-BY-4.0 | Allowed, with credit | Allowed |
+| CC-BY-SA-3.0, CC-BY-SA-4.0 (share-alike) | **Refused** until a person decides | Allowed |
+| Anything else (GPL, non-commercial, custom, `proprietary`) | Refused | Allowed |
+| Missing, blank, or a word such as "unknown" | Refused | Refused |
+
+Link-only documents store only our own short description and the link, so the source's licence does not limit us. A licence must still be recorded. Licence names are written in their standard form (`mit` becomes `MIT`). To allow a licence, add it to `ALLOWED_FULL_TEXT`. This is a code change on purpose, so it goes through review.
+
+### Source adapters (task 6)
+
+Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, what to skip, how to clean them and which licence and credit line apply. It returns a `SourceBatch` with the documents and a list of what it skipped and why. It never writes to ChromaDB; the pipeline does.
+
+| Source | Adapter | Mode | Licence | How it is read | Result |
+|---|---|---|---|---|---|
+| Tech Interview Handbook | `tech_interview_handbook.py` | full text | MIT, checked on every run | GitHub MCP server, through the gateway | 45 pages on the copy checked (2026-08-07), 4 files skipped |
+| roadmap.sh | `link_only.py` with `data/roadmap_sh.yaml` | link only | `proprietary` (links only) | Our own YAML list. No network, no MCP | 41 links with descriptions written by us |
+
+**Reading files.** Adapters read through a small `SourceReader` interface. In production that is `GatewayGitHubReader` (`readers.py`), which goes through the MCP gateway and refuses a failed call, old cached data, a result cut at `max_result_chars`, and an empty reply. In tests it is an in-memory reader, so the adapters run with no network.
+
+**Handbook cleaning.** Before storing, the adapter removes page headers, imports, components, HTML and images; links keep their text but lose the address; paragraphs, list items and table rows with affiliate links or sales wording are removed. Code blocks and inline code are never changed. A page that has under 200 characters left is skipped. It skips `resume-old.md`, `best-coding-interview-courses.md`, `mock-interviews.md` and template files, and records the reason for each. Each page is classified into a `content_type`, `role_family` and `level` from its file name, so behavioural pages go to `interview_knowledge` and the study plan goes to `learning_knowledge`.
+
+**Link-only lists.** Each entry needs a URL, title, domain, role family and a one-sentence summary. A bad or repeated entry is skipped with a reason and the rest still load. The text stored is the title and the summary.
+
+**Credit.** Each source's credit line and licence notice are recorded in `docs/attribution.md`.
+
+### Adding a source
+
+1. Vet it and record the verdict in `docs/mcp/vetting-log.md`.
+2. Read its licence file itself.
+3. Full text: add an adapter in `app/ingest/sources/` that returns a `SourceBatch`. Link only: add a YAML list and use `LinkOnlyAdapter`.
+4. Add it to `docs/attribution.md`.
+5. Add tests, then run a first ingest and check the stored credit line.
+
+---
+
 ## What the rest of Phase 7 builds on this
 
 | Task | Uses |
 |---|---|
-| 5 | Pipeline writes `KnowledgeDoc` chunks with deterministic ids. Needs an upsert, because `VectorStore.add_documents` currently adds with random ids |
-| 6, 7 | Source adapters fill the fields. The licence gate checks `licence`, `attribution` and `ingest_mode` |
-| 8 | Refresh and expiry use `expires_at_ts` and `content_hash` |
+| 5 | **Built.** Pipeline writes `KnowledgeDoc` chunks with deterministic ids through `upsert_documents` |
+| 6, 7 | **Built.** Source adapters fill the fields. The licence gate checks `licence`, `attribution` and `ingest_mode` |
+| 8 | Refresh and expiry use `expires_at_ts` and `content_hash`. It also runs the adapters for real (`python -m app.ingest.run --source X`) |
 | 9 | Retriever v2 filters on the fields above and returns `title`, `url`, `licence` and `attribution` as citations |
 | 11, 12 | The agents return `sources[]` built from the chunk metadata |
 | 13, 14 | The evaluation set and tests cover the filters, idempotency and the licence gate |
@@ -129,12 +207,13 @@ What follows from it:
 ## Findings from reading the code
 
 - `RetrieverAgent` (`agents/shared/retriever_agent.py`) is used nowhere and would fail if it were: it `await`s a function that is not async and passes `collection=` where the retriever expects `collection_name=`. Remove it, or fix it, during task 9.
-- ChromaDB's `$in` and numeric comparisons are assumed to work as documented. Task 14 proves that with tests against the real client.
+- ChromaDB's `$in` and numeric comparisons, and the new `upsert`, `update` and `delete` calls, are assumed to work as documented. The unit tests use a fake store. Task 14 proves them against the real client.
 
 ## Open items
 
-- Default `expires_at` per source type. Starting point: 90 days for a static repository, shorter for anything that changes often. Tune in task 8.
-- The exact licence allowlist (for example how to treat `CC-BY-SA`, which has share-alike terms) belongs to task 7 and needs a human decision.
+- Default `expires_at`: the adapters use 90 days for a static repository (`DEFAULT_EXPIRY`). Tune per source in task 8.
+- **Share-alike licences** (CC-BY-SA) are refused for full text. Someone must decide whether we can accept them and what that means for our own content. To allow them, move their names from `NEEDS_DECISION` to `ALLOWED_FULL_TEXT` in `licence.py`.
+- The GitHub MCP server is only checked against an in-memory server (image tag, `stdio` subcommand, response shape, folder-listing format). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
 
 ## Changelog
@@ -142,3 +221,4 @@ What follows from it:
 | Date | Change |
 |---|---|
 | 2026-11-10 | First version: schema, two-collection layout, embedding model kept |
+| 2026-11-18 | Added Decision 4: pipeline, licence gate and source adapters (tasks 5 to 7). Corrected the update rules to match the code. Updated status and open items |
