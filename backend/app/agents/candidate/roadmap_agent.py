@@ -11,6 +11,9 @@ This is the first agent that combines LLM + RAG. Flow:
 Design notes:
   - Links in the plan can only come from retrieved chunks. A link the model made up is
     dropped, and a link that was retrieved always gets its real title.
+  - Which chunks reach the prompt is decided by a rank score: the match (similarity)
+    first, nudged by how far the source is trusted and how recently the page was
+    confirmed (task 12). Every skill gap with a match keeps at least its best chunk.
   - When nothing reviewed matched, the plan is built from general knowledge: generic
     resource wording, no links, and a `notice` that says so.
   - Retrieval is synchronous (embedding + Chroma HTTP), so it runs in a worker thread.
@@ -19,6 +22,8 @@ Design notes:
 import asyncio
 import json
 import logging
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,8 +50,62 @@ COLLECTION = LEARNING_COLLECTION
 # Balance: too few → LLM can't ground, too many → prompt bloat + retrieval noise.
 RESOURCES_PER_SKILL = 3
 MAX_TOTAL_RESOURCES = 12
+MAX_SKILLS_SEARCHED = 12  # one search each; later gaps get generic entries
 MAX_CONTENT_CHARS = 500  # cap chunk size for prompt budget
 # Weak matches are dropped by search() itself (its default similarity cutoff, 0.30).
+
+# ── Ranking (Phase 7, task 12) ───────────────────────────────────────────
+# rank score = similarity x (BASE + TRUST x trust + FRESH x freshness)
+# Similarity stays the main term, so trust and freshness only separate near ties: the
+# official page of a tool beats a loose match from a list, never a clearly better one.
+# The weights are starting values. The golden set (task 13) is where to tune them.
+RANK_BASE_WEIGHT = 0.6
+RANK_TRUST_WEIGHT = 0.3
+RANK_FRESH_WEIGHT = 0.1
+
+# How far each source is trusted, from 0 to 1. A source that is not listed gets
+# DEFAULT_TRUST, so adding a list never breaks ranking, but a test makes sure every
+# link source has an entry on purpose.
+SOURCE_TRUST: dict[str, float] = {
+    "official-docs": 1.0,  # published by the makers of the tool
+    "roadmap-sh": 0.8,  # curated by a well-known community project
+    "freecodecamp": 0.8,
+    "tech-interview-handbook": 0.7,
+}
+DEFAULT_TRUST = 0.5
+
+# A page confirmed today scores 1, and the score falls evenly to 0 at this age. It
+# matches the 90 day expiry, so a page that is about to expire counts as stale.
+FRESH_HORIZON_SECONDS = 90 * 24 * 3600
+NEUTRAL_FRESHNESS = 0.5  # when a chunk has no usable date
+
+
+def source_trust(metadata: Mapping[str, Any]) -> float:
+    """0 to 1: how far the chunk's source is trusted."""
+    return SOURCE_TRUST.get(str(metadata.get("source_id", "")), DEFAULT_TRUST)
+
+
+def freshness(metadata: Mapping[str, Any], now: float) -> float:
+    """0 to 1: 1 for a page confirmed just now, 0 at FRESH_HORIZON_SECONDS old.
+
+    `fetched_at_ts` is refreshed by every ingest run (a page that still exists is
+    re-dated), so it says when the page was last confirmed, not when it was written.
+    A missing or odd date is neutral. A date in the future counts as just now.
+    """
+    raw = metadata.get("fetched_at_ts")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return NEUTRAL_FRESHNESS
+    age = max(0.0, now - raw)
+    return max(0.0, 1.0 - age / FRESH_HORIZON_SECONDS)
+
+
+def rank_score(similarity: float, metadata: Mapping[str, Any], now: float) -> float:
+    """What orders chunks before the cap. Higher is better."""
+    return similarity * (
+        RANK_BASE_WEIGHT
+        + RANK_TRUST_WEIGHT * source_trust(metadata)
+        + RANK_FRESH_WEIGHT * freshness(metadata, now)
+    )
 
 
 _ROADMAP_FALLBACK: dict[str, Any] = {
@@ -56,6 +115,41 @@ _ROADMAP_FALLBACK: dict[str, Any] = {
     "summary": "Roadmap unavailable — please try again",
     "_parse_error": True,
 }
+
+
+@dataclass(frozen=True)
+class _Candidate:
+    """One retrieved chunk, with its rank score, before the cap is applied."""
+
+    score: float
+    skill: str
+    chunk_id: str
+    resource: dict  # for the prompt
+    citation: dict
+
+
+def _select(candidates: list[_Candidate], limit: int) -> list[_Candidate]:
+    """Choose which candidates reach the prompt, best first.
+
+    Every skill gap keeps its best chunk, as far as the limit allows (the best of the
+    skills first if there are more skills than room). The rest of the room goes to the
+    best of what is left. Without this, a skill with a few strong matches could push
+    out another skill's only match.
+    """
+    best: dict[str, _Candidate] = {}
+    for c in candidates:
+        if c.skill not in best or c.score > best[c.skill].score:
+            best[c.skill] = c
+
+    chosen = sorted(best.values(), key=lambda c: c.score, reverse=True)[:limit]
+    taken = {c.chunk_id for c in chosen}
+    rest = sorted(
+        (c for c in candidates if c.chunk_id not in taken),
+        key=lambda c: c.score,
+        reverse=True,
+    )
+    chosen += rest[: max(0, limit - len(chosen))]
+    return sorted(chosen, key=lambda c: c.score, reverse=True)
 
 
 @dataclass(frozen=True)
@@ -92,7 +186,8 @@ class RoadmapAgent:
         # plan["notice"]: set when the plan rests on no reviewed source
     """
 
-    def __init__(self):
+    def __init__(self, clock: Callable[[], float] = time.time):
+        self.clock = clock  # Unix seconds; tests replace it to fix "now" for freshness
         # Slight temperature for variety — same input twice shouldn't give identical plans
         self.llm = get_llm(temperature=0.3, max_tokens=4096)
         self.prompt = ChatPromptTemplate.from_template(ROADMAP_PROMPT)
@@ -165,11 +260,18 @@ class RoadmapAgent:
     # ── RAG retrieval ────────────────────────────────────────────────────
 
     def _retrieve_resources(self, skill_gaps: list[str]) -> _Context:
-        """Query ChromaDB once per skill, merge results, dedupe by chunk."""
-        found: list[tuple[dict, dict]] = []  # (prompt resource, citation)
+        """Query ChromaDB once per skill, merge results, rank them, apply the cap."""
+        if len(skill_gaps) > MAX_SKILLS_SEARCHED:
+            logger.info(
+                "RoadmapAgent: %d gaps, searching the first %d",
+                len(skill_gaps),
+                MAX_SKILLS_SEARCHED,
+            )
+        now = self.clock()
+        candidates: list[_Candidate] = []
         seen_ids: set[str] = set()
 
-        for skill in skill_gaps:
+        for skill in skill_gaps[:MAX_SKILLS_SEARCHED]:
             query = f"learning resources for {skill}"
             try:
                 retrieval = retrieve_with_fallback(
@@ -188,34 +290,33 @@ class RoadmapAgent:
                     continue
                 seen_ids.add(chunk.id)
                 citation = chunk.citation
-                found.append(
-                    (
-                        {
+                candidates.append(
+                    _Candidate(
+                        score=rank_score(chunk.similarity, chunk.metadata, now),
+                        skill=skill,
+                        chunk_id=chunk.id,
+                        resource={
                             "title": citation["title"],
                             "url": citation["url"],
                             "content": chunk.text[:MAX_CONTENT_CHARS],
                             "matched_skill": skill,
                             "similarity": round(chunk.similarity, 3),
                         },
-                        citation,
+                        citation=citation,
                     )
                 )
 
-            if len(found) >= MAX_TOTAL_RESOURCES:
-                break
-
-        # Sort by similarity descending — best matches first for LLM attention
-        found.sort(key=lambda pair: pair[0]["similarity"], reverse=True)
-        found = found[:MAX_TOTAL_RESOURCES]
+        # Best rank first, so the model sees the strongest resources first
+        chosen = _select(candidates, MAX_TOTAL_RESOURCES)
 
         sources: list[dict] = []
         listed: set[str] = set()
-        for _, citation in found:
-            key = citation["url"] or citation["title"]
+        for c in chosen:
+            key = c.citation["url"] or c.citation["title"]
             if key not in listed:
                 listed.add(key)
-                sources.append(citation)
-        return _Context(resources=[r for r, _ in found], sources=sources)
+                sources.append(c.citation)
+        return _Context(resources=[c.resource for c in chosen], sources=sources)
 
     @staticmethod
     def _add_sources(plan: dict[str, Any], context: _Context) -> None:

@@ -4,6 +4,7 @@ Roadmap has the most complex output (nested weeks + resources). Tests focus on:
   - Correct parsing of nested schema
   - Retrieval: one search per skill on `learning_knowledge`, in a worker thread,
     with a stand-in retriever (no ChromaDB, no embedding model)
+  - Ranking: source trust and freshness nudge the order, similarity stays the main term
   - Links: only retrieved links survive, and they carry their real titles
   - `sources` and `notice`: what the plan cites, and the general-knowledge notice
   - Malformed weeks are cleaned up by _normalize
@@ -16,7 +17,17 @@ import threading
 import pytest
 
 from app.agents.candidate import roadmap_agent as roadmap_module
-from app.agents.candidate.roadmap_agent import RoadmapAgent
+from app.agents.candidate.roadmap_agent import (
+    DEFAULT_TRUST,
+    FRESH_HORIZON_SECONDS,
+    NEUTRAL_FRESHNESS,
+    SOURCE_TRUST,
+    RoadmapAgent,
+    freshness,
+    rank_score,
+    source_trust,
+)
+from app.ingest import run as run_module
 from app.ingest.schema import LEARNING_COLLECTION
 from app.mcp.security import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
 from app.rag.fallback import (
@@ -700,3 +711,373 @@ class TestFallback:
 
         assert result.get("_parse_error") is True
         assert "Rate limit" in result.get("_error_reason", "")
+
+
+# ── Ranking: trust and freshness (Phase 7, task 12) ──────────────────
+
+NOW = 1_800_000_000  # a fixed "now", in Unix seconds
+DAY = 24 * 3600
+
+
+def meta(source=None, age_days=None) -> dict:
+    """Chunk metadata with only what ranking reads."""
+    data: dict = {}
+    if source is not None:
+        data["source_id"] = source
+    if age_days is not None:
+        data["fetched_at_ts"] = int(NOW - age_days * DAY)
+    return data
+
+
+def ranked_chunk(chunk_id, similarity, source=None, age_days=0, title=None):
+    """A chunk that carries a source and a date, for the agent-level tests."""
+    chunk = make_chunk(
+        chunk_id, f"https://example.com/{chunk_id}", title or chunk_id, similarity
+    )
+    chunk.metadata.update(meta(source, age_days))
+    return chunk
+
+
+def sent_resources(agent) -> list[dict]:
+    """The resources the model was given, in the order it was given them."""
+    sent = agent.chain.calls[0]["resources"]
+    return json.loads(sent.split("---\n", 1)[1].rsplit("\n", 1)[0])
+
+
+def ranking_agent() -> RoadmapAgent:
+    return RoadmapAgent(clock=lambda: NOW)
+
+
+class TestSourceTrust:
+    def test_each_source_has_its_own_trust(self):
+        assert source_trust({"source_id": "official-docs"}) == 1.0
+        assert source_trust({"source_id": "roadmap-sh"}) == 0.8
+        assert source_trust({"source_id": "freecodecamp"}) == 0.8
+        assert source_trust({"source_id": "tech-interview-handbook"}) == 0.7
+
+    def test_official_docs_are_trusted_most(self):
+        assert SOURCE_TRUST["official-docs"] == max(SOURCE_TRUST.values())
+
+    def test_an_unknown_or_missing_source_gets_the_default(self):
+        assert source_trust({"source_id": "never-heard-of-it"}) == DEFAULT_TRUST
+        assert source_trust({}) == DEFAULT_TRUST
+
+    def test_the_default_is_below_every_listed_source(self):
+        assert DEFAULT_TRUST < min(SOURCE_TRUST.values())
+
+    def test_every_trust_value_is_between_0_and_1(self):
+        assert all(0 <= v <= 1 for v in SOURCE_TRUST.values())
+        assert 0 <= DEFAULT_TRUST <= 1
+
+    def test_trust_is_set_for_every_link_source_on_purpose(self):
+        # A new link list must get a trust value, not fall back to the default.
+        link_sources = {n for n, s in run_module.SOURCES.items() if s.link_only}
+        assert link_sources <= set(SOURCE_TRUST)
+
+    def test_the_trust_table_names_only_real_sources(self):
+        assert set(SOURCE_TRUST) <= set(run_module.SOURCES)
+
+
+class TestFreshness:
+    def test_a_page_confirmed_now_is_fully_fresh(self):
+        assert freshness(meta(age_days=0), NOW) == 1.0
+
+    def test_freshness_falls_evenly_with_age(self):
+        half = FRESH_HORIZON_SECONDS / 2 / DAY
+        assert freshness(meta(age_days=half), NOW) == pytest.approx(0.5)
+        quarter = FRESH_HORIZON_SECONDS / 4 / DAY
+        assert freshness(meta(age_days=quarter), NOW) == pytest.approx(0.75)
+
+    def test_a_page_as_old_as_the_horizon_is_not_fresh_at_all(self):
+        assert freshness(meta(age_days=FRESH_HORIZON_SECONDS / DAY), NOW) == 0.0
+
+    def test_older_than_the_horizon_stays_at_zero(self):
+        assert freshness(meta(age_days=400), NOW) == 0.0
+
+    def test_the_horizon_matches_the_90_day_expiry(self):
+        assert FRESH_HORIZON_SECONDS == 90 * DAY
+
+    def test_a_date_in_the_future_counts_as_just_now(self):
+        assert freshness({"fetched_at_ts": NOW + 5 * DAY}, NOW) == 1.0
+
+    def test_a_missing_date_is_neutral(self):
+        assert freshness({}, NOW) == NEUTRAL_FRESHNESS
+
+    @pytest.mark.parametrize("bad", ["yesterday", None, True, [1], {"a": 1}])
+    def test_a_date_that_is_not_a_number_is_neutral(self, bad):
+        assert freshness({"fetched_at_ts": bad}, NOW) == NEUTRAL_FRESHNESS
+
+    def test_a_decimal_date_works(self):
+        assert freshness({"fetched_at_ts": NOW - 1.5}, NOW) == pytest.approx(
+            1.0, abs=1e-6
+        )
+
+
+class TestRankScore:
+    def test_the_weights_add_up_to_one(self):
+        total = (
+            roadmap_module.RANK_BASE_WEIGHT
+            + roadmap_module.RANK_TRUST_WEIGHT
+            + roadmap_module.RANK_FRESH_WEIGHT
+        )
+        assert total == pytest.approx(1.0)
+
+    def test_a_fully_trusted_fresh_chunk_scores_its_similarity(self):
+        assert rank_score(0.7, meta("official-docs", 0), NOW) == pytest.approx(0.7)
+
+    def test_nothing_scores_above_its_similarity(self):
+        for source in (*SOURCE_TRUST, "other", None):
+            for age in (0, 30, 200, None):
+                assert rank_score(0.6, meta(source, age), NOW) <= 0.6 + 1e-9
+
+    def test_official_docs_beat_a_list_at_the_same_similarity(self):
+        official = rank_score(0.7, meta("official-docs", 0), NOW)
+        listed = rank_score(0.7, meta("roadmap-sh", 0), NOW)
+        assert official > listed
+
+    def test_a_slightly_better_match_from_a_list_can_lose_to_official_docs(self):
+        official = rank_score(0.70, meta("official-docs", 0), NOW)
+        listed = rank_score(0.74, meta("roadmap-sh", 0), NOW)
+        assert official > listed
+
+    def test_a_clearly_better_match_wins_whatever_the_source(self):
+        weak_official = rank_score(0.50, meta("official-docs", 0), NOW)
+        strong_unknown = rank_score(0.90, meta("unknown", 0), NOW)
+        assert strong_unknown > weak_official
+
+    def test_a_fresher_page_beats_a_staler_one_at_the_same_similarity(self):
+        fresh = rank_score(0.7, meta("roadmap-sh", 5), NOW)
+        stale = rank_score(0.7, meta("roadmap-sh", 80), NOW)
+        assert fresh > stale
+
+    def test_freshness_matters_less_than_trust(self):
+        # The worst date costs less than the worst source.
+        date_cost = rank_score(0.7, meta("official-docs", 0), NOW) - rank_score(
+            0.7, meta("official-docs", 90), NOW
+        )
+        trust_cost = rank_score(0.7, meta("official-docs", 0), NOW) - rank_score(
+            0.7, meta("zzz", 0), NOW
+        )
+        assert 0 < date_cost < trust_cost
+
+    def test_chunks_without_source_or_date_keep_the_order_of_their_similarity(self):
+        scores = [rank_score(s, {}, NOW) for s in (0.9, 0.7, 0.5, 0.31)]
+        assert scores == sorted(scores, reverse=True)
+        assert len(set(scores)) == 4
+
+    def test_a_zero_similarity_scores_zero(self):
+        assert rank_score(0.0, meta("official-docs", 0), NOW) == 0.0
+
+
+def cand(score, skill, chunk_id):
+    return roadmap_module._Candidate(
+        score=score,
+        skill=skill,
+        chunk_id=chunk_id,
+        resource={"url": chunk_id},
+        citation={"url": chunk_id, "title": chunk_id},
+    )
+
+
+class TestSelect:
+    select = staticmethod(roadmap_module._select)
+
+    def test_everything_is_kept_when_there_is_room_and_ordered_best_first(self):
+        chosen = self.select([cand(0.4, "b", "b1"), cand(0.9, "a", "a1")], 5)
+        assert [c.chunk_id for c in chosen] == ["a1", "b1"]
+
+    def test_the_cap_drops_the_lowest_ranked(self):
+        cands = [cand(0.9, "a", "a1"), cand(0.8, "a", "a2"), cand(0.7, "a", "a3")]
+        assert [c.chunk_id for c in self.select(cands, 2)] == ["a1", "a2"]
+
+    def test_every_skill_keeps_its_best_chunk_before_a_skill_gets_a_second(self):
+        cands = [
+            cand(0.9, "a", "a1"),
+            cand(0.85, "a", "a2"),
+            cand(0.8, "a", "a3"),
+            cand(0.4, "b", "b1"),
+        ]
+        assert [c.chunk_id for c in self.select(cands, 3)] == ["a1", "a2", "b1"]
+
+    def test_with_more_skills_than_room_the_best_skills_win(self):
+        cands = [cand(0.5, "a", "a1"), cand(0.9, "b", "b1"), cand(0.7, "c", "c1")]
+        assert [c.chunk_id for c in self.select(cands, 2)] == ["b1", "c1"]
+
+    def test_the_best_chunk_of_a_skill_is_its_highest_ranked_one(self):
+        cands = [cand(0.3, "a", "a1"), cand(0.8, "a", "a2"), cand(0.5, "b", "b1")]
+        assert [c.chunk_id for c in self.select(cands, 2)] == ["a2", "b1"]
+
+    def test_a_limit_of_zero_keeps_nothing(self):
+        assert self.select([cand(0.9, "a", "a1")], 0) == []
+
+    def test_no_candidates_give_nothing(self):
+        assert self.select([], 12) == []
+
+    def test_equal_scores_keep_their_retrieval_order(self):
+        cands = [cand(0.5, "a", "a1"), cand(0.5, "b", "b1"), cand(0.5, "c", "c1")]
+        assert [c.chunk_id for c in self.select(cands, 3)] == ["a1", "b1", "c1"]
+
+
+class TestRankingInTheAgent:
+    @pytest.mark.asyncio
+    async def test_official_docs_come_first_when_the_match_is_close(
+        self, full_llm_response
+    ):
+        agent = ranking_agent()
+        chunks = {
+            "learning resources for Docker": [
+                ranked_chunk("road", 0.74, "roadmap-sh"),
+                ranked_chunk("docs", 0.70, "official-docs"),
+            ]
+        }
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+        assert [r["title"] for r in sent_resources(agent)] == ["docs", "road"]
+
+    @pytest.mark.asyncio
+    async def test_the_prompt_still_shows_the_real_similarity(self, full_llm_response):
+        agent = ranking_agent()
+        chunks = {
+            "learning resources for Docker": [
+                ranked_chunk("docs", 0.70, "official-docs")
+            ]
+        }
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+        (resource,) = sent_resources(agent)
+        assert resource["similarity"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_a_clearly_better_match_still_comes_first(self, full_llm_response):
+        agent = ranking_agent()
+        chunks = {
+            "learning resources for Docker": [
+                ranked_chunk("docs", 0.50, "official-docs"),
+                ranked_chunk("road", 0.90, "roadmap-sh"),
+            ]
+        }
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+        assert [r["title"] for r in sent_resources(agent)] == ["road", "docs"]
+
+    @pytest.mark.asyncio
+    async def test_a_fresher_page_comes_first_when_all_else_is_equal(
+        self, full_llm_response
+    ):
+        agent = ranking_agent()
+        chunks = {
+            "learning resources for Docker": [
+                ranked_chunk("old", 0.70, "roadmap-sh", age_days=85),
+                ranked_chunk("new", 0.70, "roadmap-sh", age_days=2),
+            ]
+        }
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+        assert [r["title"] for r in sent_resources(agent)] == ["new", "old"]
+
+    @pytest.mark.asyncio
+    async def test_the_clock_given_to_the_agent_decides_how_old_a_page_is(
+        self, full_llm_response
+    ):
+        # The same two chunks swap places when "now" moves, because the one that was
+        # confirmed earlier becomes the staler one.
+        chunks = {
+            "learning resources for Docker": [
+                ranked_chunk("a", 0.70, "roadmap-sh", age_days=10),
+                ranked_chunk("b", 0.70, "roadmap-sh", age_days=-30),  # in the future
+            ]
+        }
+        agent = ranking_agent()
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+        assert [r["title"] for r in sent_resources(agent)] == ["b", "a"]
+
+        later = RoadmapAgent(clock=lambda: NOW - 200 * DAY)
+        await run(later, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+        # Both dates are now in the future for this clock, so both are fully fresh
+        # and their order is the order they were retrieved in.
+        assert [r["title"] for r in sent_resources(later)] == ["a", "b"]
+
+    def test_the_default_clock_is_the_real_time(self):
+        agent = RoadmapAgent()
+        before = roadmap_module.time.time()
+        assert before <= agent.clock() <= roadmap_module.time.time()
+
+    @pytest.mark.asyncio
+    async def test_the_cap_keeps_a_trusted_chunk_over_a_slightly_closer_unknown_one(
+        self, full_llm_response
+    ):
+        agent = ranking_agent()
+        crowd = [
+            ranked_chunk(f"x{n}", 0.50, "unknown-source")
+            for n in range(roadmap_module.MAX_TOTAL_RESOURCES)
+        ]
+        official = ranked_chunk("docs", 0.49, "official-docs")
+        chunks = {"learning resources for Docker": [*crowd, official]}
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=["Docker"])
+
+        titles = [r["title"] for r in sent_resources(agent)]
+        assert len(titles) == roadmap_module.MAX_TOTAL_RESOURCES
+        assert titles[0] == "docs"  # lowest similarity, but ranked first
+        assert "x11" not in titles  # the last of the crowd is the one that is cut
+
+    @pytest.mark.asyncio
+    async def test_every_skill_with_a_match_keeps_a_resource_under_the_cap(
+        self, full_llm_response
+    ):
+        agent = ranking_agent()
+        strong = [
+            ranked_chunk(f"s{n}", 0.90 - n * 0.01, "official-docs") for n in range(3)
+        ]
+        chunks = {"learning resources for Strong": strong}
+        skills = ["Strong"]
+        for n in range(11):
+            skills.append(f"Weak{n}")
+            chunks[f"learning resources for Weak{n}"] = [
+                ranked_chunk(f"w{n}", 0.35, "unknown-source")
+            ]
+        await run(agent, FakeRetriever(chunks), full_llm_response, skills=skills)
+
+        resources = sent_resources(agent)
+        assert len(resources) == roadmap_module.MAX_TOTAL_RESOURCES
+        assert {r["matched_skill"] for r in resources} == set(skills)
+
+    @pytest.mark.asyncio
+    async def test_a_skill_with_no_match_takes_no_room(self, full_llm_response):
+        agent = ranking_agent()
+        chunks = {
+            "learning resources for Docker": [ranked_chunk("d1", 0.8, "official-docs")]
+        }
+        await run(
+            agent,
+            FakeRetriever(chunks),
+            full_llm_response,
+            skills=["Docker", "Nothing matches this"],
+        )
+        assert [r["title"] for r in sent_resources(agent)] == ["d1"]
+
+    @pytest.mark.asyncio
+    async def test_only_the_first_skills_are_searched(self, full_llm_response):
+        agent = ranking_agent()
+        retriever = FakeRetriever({})
+        skills = [f"skill{n}" for n in range(roadmap_module.MAX_SKILLS_SEARCHED + 5)]
+        result = await run(agent, retriever, full_llm_response, skills=skills)
+
+        assert len(retriever.calls) == roadmap_module.MAX_SKILLS_SEARCHED
+        assert retriever.calls[-1]["query"].endswith(f"skill{len(retriever.calls) - 1}")
+        # The model is still told about every gap
+        assert json.loads(agent.chain.calls[0]["skill_gaps"]) == skills
+        assert result["notice"] == GENERAL_KNOWLEDGE_USER_NOTE
+
+    @pytest.mark.asyncio
+    async def test_sources_follow_the_ranked_order(self, full_llm_response):
+        agent = ranking_agent()
+        chunks = {
+            "learning resources for Docker": [
+                ranked_chunk("road", 0.74, "roadmap-sh"),
+                ranked_chunk("docs", 0.70, "official-docs"),
+            ]
+        }
+        reply = plan_with_resources(
+            [
+                {"title": "x", "url": "https://example.com/road", "type": "docs"},
+                {"title": "y", "url": "https://example.com/docs", "type": "docs"},
+            ]
+        )
+        result = await run(agent, FakeRetriever(chunks), reply, skills=["Docker"])
+        assert [c["title"] for c in result["sources"]] == ["docs", "road"]
