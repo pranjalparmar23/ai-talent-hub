@@ -2,7 +2,7 @@
 
 Credits and licence notices for outside material used by the AI Talent Hub knowledge layer (Phase 7).
 
-**Tracker:** Phase 7, tasks 6 and 7. **Last updated:** 2026-11-18.
+**Tracker:** Phase 7, tasks 6, 7 and 10. **Last updated:** 2026-11-19.
 **Related:** `docs/mcp/vetting-log.md` (why each source got its verdict), `docs/architecture/knowledge-layer.md` (how credit is stored).
 
 This is a record of what we use and how we credit it, not legal advice.
@@ -13,6 +13,7 @@ This is a record of what we use and how we credit it, not legal advice.
 
 - Every stored chunk carries its source id, page URL, licence and credit line as metadata. Retrieval returns them as the citation, and the interface shows them next to the answer (tasks 9 and 16).
 - The licence gate (`app/ingest/licence.py`) refuses any document without a recorded licence and credit line. Share-alike licences (CC-BY-SA) are refused until a human decides how they affect our corpus.
+- When nothing in the knowledge base matches, no source is shown. The answer comes from the model's own knowledge and is labelled as not based on our reviewed sources (task 10).
 - There are two ways to use a source:
   - **Full text:** only when the licence allows copying. The credit line and licence notice stay with the content.
   - **Link only:** for restrictive or unconfirmed licences. We store a link, a title and a short description that we wrote ourselves. Nothing is copied from the source.
@@ -87,9 +88,11 @@ Both are approved for link-only use and **nothing from them is stored yet**. The
 
 ---
 
-## Looked up live, not stored
+## No live web lookups
 
-Search and fetch servers (such as Brave Search, Tavily and Fetch) are used for live lookups only. A live result is shown with a link to its source. It is stored only if it passes the licence gate, which refuses anything without a recorded licence.
+The app does not search the web or fetch pages live. Brave Search and Tavily were considered for that and are **not adopted** (see `docs/mcp/vetting-log.md`, 2026-11-19). When our knowledge base has nothing for a request, the answer comes from the model's own knowledge. It carries no sources, no links and no quotes, and it is labelled as not based on our reviewed sources (`docs/architecture/knowledge-layer.md`, Decision 7).
+
+Nothing outside the sources listed on this page is ever shown as a cited source. If live lookups are added later, each service needs its own review and an entry here first. A live result must be shown with a link to its source and must not be stored.
 
 ---
 

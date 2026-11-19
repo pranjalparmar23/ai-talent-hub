@@ -182,6 +182,6 @@ The Phase 7 source adapters read files from public GitHub repositories through t
 ## 11. What comes next
 
 - **Phase 6 spike:** vet candidate servers and data sources; nothing is enabled until it passes.
-- **Phase 7:** the RAG rebuild is the first real caller of the gateway. The source adapters (task 6, section 10) are built; the live-lookup fallback (task 10) comes next.
+- **Phase 7:** the RAG rebuild is the first real caller of the gateway. The source adapters (task 6, section 10) are built. There is no live web lookup: when the knowledge base has nothing for a request, the answer comes from the model's own knowledge (task 10, `docs/architecture/knowledge-layer.md`, Decision 7), so no search server is enabled or planned.
 - **Phase 11:** injection detection on MCP output and guardrails on what reaches prompts.
 - **Phase 12:** gateway metrics (calls, cache hit rate, circuit state) on the monitoring dashboard.

@@ -4,6 +4,7 @@ Verdicts for external MCP servers and content sources, following `docs/mcp/vetti
 
 - **Date of review:** 2026-11-09. All pages were read on that date; links are under each record.
 - **Status:** these are **proposed** verdicts. Nothing is enabled. Approval means, at most, a disabled entry in `backend/app/mcp/mcp_servers.yaml`.
+- **Update 2026-11-19:** the live web search plan (Phase 7, task 10) was dropped. Brave Search and Tavily are now marked **not adopted**. Their records stay below as research, in case the idea comes back. When retrieval finds nothing, the app answers from the model's own knowledge instead (`docs/architecture/knowledge-layer.md`, Decision 7).
 - **Tracker:** Phase 6, task 9. Rows refer to the "🔌 Tools & Sources" sheet.
 - **Evidence quality:** *primary* means the project, registry or vendor page itself. *Index* means a third-party aggregator, so confirm at the source before relying on it. *Unverified* means the page could not be read, and nothing was assumed.
 - This is a due-diligence record, not legal advice.
@@ -15,8 +16,8 @@ Verdicts for external MCP servers and content sources, following `docs/mcp/vetti
 | 4 | Official MCP Python SDK | 6 | Approve as a dependency; review the v2 jump before upgrading |
 | 6 | MCP Fetch reference server | 7 | **approve-live-only** |
 | 6 | Firecrawl MCP | 7 | **reject** (for now; redundant with Fetch) |
-| 7 | Brave Search MCP | 7 | **approve-live-only** (no retention allowed) |
-| 7 | Tavily MCP | 7 | **approve-live-only** (backup; `tavily_search` only) |
+| 7 | Brave Search MCP | 7 | **not adopted** (2026-11-19: no live web search, and no free plan any more; was approve-live-only) |
+| 7 | Tavily MCP | 7 | **not adopted** (2026-11-19: no live web search; was approve-live-only as a backup) |
 | 8 | GitHub MCP server | 7 | **approve-live-only** (read-only mode). Also reads repository files for ingestion from licence-checked repos (disabled entry added 2026-11-18) |
 | 9 | Context7 MCP | 7 | **reject** (for now; low fit, limits not found) |
 | 10 | Wikipedia MCP (community) | 7 | **reject** the server; Wikipedia content stays **link-only** until its licence is read |
@@ -36,7 +37,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 ## Follow-ups that came out of this review
 
 1. **The official `mcp` package is now at 2.3.0** (released 2026-10-02). We pin `mcp==1.12.4`. Do not upgrade casually: read the v2 migration notes first, then decide in a separate change. The gateway tests will tell us what breaks.
-2. **Brave does not allow retaining results on its search plans.** The gateway cache keeps results in memory. `cache_ttl_seconds: 0` plus `stale_ttl_seconds: 0` makes the entry expire immediately, but the gateway still writes it and removes it on the next lookup. If we want strict no-retention, add a `cache: false` option to the registry. Decide before enabling Brave.
+2. **Brave does not allow retaining results on its search plans.** *Update 2026-11-19: no longer needed, because Brave is not adopted.* If a future source forbids keeping its results, the registry would need a `cache: false` option so the gateway never stores them. That option was built on 2026-11-19 and removed the same day because nothing used it. The gateway cache keeps results in memory, and `cache_ttl_seconds: 0` plus `stale_ttl_seconds: 0` only makes an entry expire at once, since the gateway still writes it and removes it on the next lookup.
 3. **O*NET terms say registration-required apps need the Center's permission** unless a free, public version exists. Talent Hub has logins. Ask for permission, or confirm that a public view covers it, before enabling.
 4. **Production needs HTTP.** The gateway refuses `stdio` in production. Fetch and GitHub are shown above with stdio-style packages. Whether each ships a streamable-HTTP mode was not verified. Plan to run them as self-hosted containers (`internal: true`) or use a hosted endpoint.
 5. **Things this session could not read** (marked *unverified* below): LeetCode terms, Wikimedia reuse terms, GitHub API rate limits, Firecrawl robots.txt behaviour, Context7 request limits, the ESCO data licence, and the LICENSE files of the content repos. The Tech Interview Handbook and roadmap.sh licence files were read on 2026-11-18 (see their records); the others are still unread.
@@ -88,22 +89,23 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Conditions: revisit only if Fetch proves inadequate; then require a read of Firecrawl's terms and robots handling, and allow `scrape` only.
 - Re-review by: 2027-05-09
 
-### Brave Search MCP — 2026-11-09
+### Brave Search MCP — 2026-11-09 (updated 2026-11-19)
 - Type: MCP server (vendor)
 - Offers: web, news, image, video and local search.
 - Links (accessed 2026-11-09): [npm @brave/brave-search-mcp-server](https://www.npmjs.com/package/@brave/brave-search-mcp-server); [Brave API help](https://api-docs.search.brave.software/resources/help)
 - Rights: MIT for the server (primary). API output: the Brave help page says the "Data for Search" and "Data for AI" plans do **not** permit retaining any part of the output; only the "Data with storage rights" plan does. The API grants no rights to third-party content.
-- Maintenance: version 1.3.4 (no publish date on the page); published under the `@brave` scope, repo under Brave's organisation.
+- Maintenance: version 1.3.4 when read on 2026-11-09 (no publish date on the page); published under the `@brave` scope, repo under Brave's organisation. *Update 2026-11-19:* npm now shows version 2.1.5 (modified 2026-11-17), and 2.0.85 exists, so the 2.x line is current. The 1.3.4 review no longer matches what would be installed.
 - Tools: `brave_web_search`, `brave_local_search`, `brave_video_search`, `brave_image_search`, `brave_news_search`, `brave_summarizer` → all read-only.
 - Data sent / auth: search terms only. `BRAVE_API_KEY`. HTTP transport by default.
-- Limits and cost: the npm page lists a free plan with 2,000 queries a month; Brave's help page says the free plan needs a credit card (anti-fraud, "never billed"). Both statements are from Brave pages, but plans change, so confirm at sign-up.
+- Limits and cost: the npm page listed a free plan with 2,000 queries a month, and Brave's help page said the free plan needed a credit card (anti-fraud, "never billed"). *Update 2026-11-19:* **that is out of date.** The plans page in the project owner's Brave dashboard no longer offers a free plan. The Search plan is prepaid at $5.00 per 1,000 requests, and the Answers plan is $4.00 per 1,000 queries plus tokens.
 - Quality and coverage: general web coverage, including non-technical topics.
-- Risks found: retention rule (follow-up 2); links lead to pages with their own copyright.
-- Verdict: approve-live-only
-- Conditions: `allowed_tools: [brave_web_search]` (add `brave_news_search` later if needed); a "Data for AI" plan; **no storing results** (no ingest into RAG, minimal cache per follow-up 2); show the source link to the user; `rate_limit_per_minute` well under the plan cap; key in `.env` as `BRAVE_API_KEY`.
-- Re-review by: 2027-02-09
+- Risks found: retention rule (follow-up 2); links lead to pages with their own copyright. *Added 2026-11-19:* the output format of the server is not described in its documentation, and it was never run, so nothing about what it returns was confirmed.
+- Verdict: **not adopted (2026-11-19).** It was approve-live-only on 2026-11-09.
+- Decision (2026-11-19): the project owner decided not to pay for a search service or to rely on an outside one. A short-lived registry entry and a live-lookup module were built and then removed, so nothing from this record is in the code or enabled. The fallback when retrieval finds nothing is the model's own knowledge, clearly labelled (`docs/architecture/knowledge-layer.md`, Decision 7).
+- Conditions, kept only in case this is reopened: `allowed_tools: [brave_web_search]` (add `brave_news_search` later if needed); a paid plan whose terms were read again; **no storing results** (no ingest into RAG, and the gateway must not cache them); show the source link to the user; send short public search phrases only; `rate_limit_per_minute` well under the plan cap; a daily cap in code; key in `.env` as `BRAVE_API_KEY`; the server's output format checked against a real response; read the 2.x notes before pinning a version.
+- Re-review by: 2027-02-09, only if live search is reconsidered
 
-### Tavily MCP — 2026-11-09
+### Tavily MCP — 2026-11-09 (updated 2026-11-19)
 - Type: MCP server (vendor)
 - Offers: web search, page extraction, site crawl and mapping, and multi-source research.
 - Links (accessed 2026-11-09): [Docker MCP listing](https://hub.docker.com/mcp/server/tavily/overview); [Terms](https://www.tavily.com/terms); [API credits](https://docs.tavily.com/documentation/api-credits.md)
@@ -111,12 +113,13 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Maintenance: upstream author is tavily-ai; the Docker page is a third-party packaging (publisher field blank). No version or date seen (unverified). GitHub activity not checked.
 - Tools: `tavily_search`, `tavily_extract`, `tavily_crawl`, `tavily_map`, `tavily_research` → all fetch or search; `extract`, `crawl` and `map` take URLs; `research` is rate limited to 20 requests a minute.
 - Data sent / auth: search terms only. `TAVILY_API_KEY`.
-- Limits and cost: free plan 1,000 credits a month; search costs 1 credit (basic) or 2 (advanced).
+- Limits and cost: free plan 1,000 credits a month; search costs 1 credit (basic) or 2 (advanced). Not rechecked on 2026-11-19.
 - Quality and coverage: general web.
 - Risks found: our queries may be used to train their models, so send **only public search terms**; "internal business purposes" may not fit a user-facing product (read §2 before enabling); URL-taking tools widen SSRF exposure.
-- Verdict: approve-live-only (backup to Brave)
-- Conditions: `allowed_tools: [tavily_search]` only; no `extract`, `crawl`, `map` or `research`; search terms only, never resume or JD text; confirm §2 fits our use before `enabled: true`.
-- Re-review by: 2027-02-09
+- Verdict: **not adopted (2026-11-19).** It was approve-live-only, as a backup to Brave.
+- Decision (2026-11-19): the live web search plan was dropped (see the Brave record), so the backup is not needed. Nothing is enabled or built for it.
+- Conditions, kept only in case this is reopened: `allowed_tools: [tavily_search]` only; no `extract`, `crawl`, `map` or `research`; search terms only, never resume or JD text; confirm §2 fits our use before `enabled: true`.
+- Re-review by: 2027-02-09, only if live search is reconsidered
 
 ### GitHub MCP server — 2026-11-09
 - Type: MCP server (vendor, official)

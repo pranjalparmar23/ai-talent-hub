@@ -78,10 +78,14 @@ class KnowledgeChunk:
 
 @dataclass
 class SearchResult:
-    """What search() returns. `chunks` is best match first (after variety is applied).
+    """What search() returns.
+
+    `chunks` is in the order MMR picked them. The first is the best match. Each next
+    one trades a little relevance for variety, so a later chunk can score lower than
+    one that was left out. With `mmr=False` the order is plain best first.
 
     `candidates` and `below_cutoff` say why a result is empty: nothing matched the
-    filters at all, or everything matched too weakly. Task 10 (live lookup) and the
+    filters at all, or everything matched too weakly. The fallback (task 10) and the
     empty-retrieval metric read these.
     """
 
@@ -268,8 +272,9 @@ class RAGRetriever:
 
         Steps: filter in ChromaDB (current schema, not expired, plus the optional
         filters), fetch several times `top_k` candidates, drop those below
-        `min_similarity`, then pick `top_k` with MMR (varied, best first) and at
-        most `max_per_doc` chunks from one page. Pass `mmr=False` for plain best-first.
+        `min_similarity`, then pick `top_k` with MMR (the first pick is the best match,
+        the rest add variety) and at most `max_per_doc` chunks from one page. Pass
+        `mmr=False` for plain best-first order.
         A search that finds nothing returns an empty result; it does not raise.
         """
         _check_filters(collection, role_family, level, content_type)
