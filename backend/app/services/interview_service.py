@@ -9,6 +9,11 @@ Storage:
 
 Interview length is fixed at MAX_QUESTIONS candidate answers. No schema change is
 needed: completion is derived from the number of candidate answers in the history.
+
+Knowledge sources (Phase 7): the opening question may be based on reviewed interview
+material. start_session() passes the agent's `sources` and `notice` on to the caller so
+the app can show them next to the first question. They are not stored: the session row
+keeps only the conversation, and the later questions come from the transcript.
 """
 
 import logging
@@ -64,6 +69,8 @@ class InterviewService:
             "question": question,
             "question_number": 1,
             "max_questions": MAX_QUESTIONS,
+            "sources": result.get("sources") or [],
+            "notice": result.get("notice"),
         }
 
     async def process_response(

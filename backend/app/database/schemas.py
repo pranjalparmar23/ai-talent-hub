@@ -181,6 +181,20 @@ class JDSummary(BaseModel):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE SOURCES (Phase 7)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class SourceItem(BaseModel):
+    """One reviewed source behind an answer (a chunk's citation, one per page)."""
+
+    title: str
+    url: str = ""
+    licence: str = ""
+    attribution: str = ""  # the credit line to show next to the link
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # ATS SCORE / SKILL GAP / ROADMAP
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -218,6 +232,10 @@ class LearningPlanResponse(BaseModel):
     target_role: Optional[str] = None
     weeks: List[RoadmapWeek] = Field(default_factory=list)
     summary: Optional[str] = None
+    # Reviewed sources the plan was built from. `notice` is set only when none
+    # matched, and says that the plan comes from general knowledge.
+    sources: List[SourceItem] = Field(default_factory=list)
+    notice: Optional[str] = None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -243,6 +261,10 @@ class InterviewStartResponse(BaseModel):
     question: str
     question_number: int = 1
     max_questions: int = 6
+    # Reviewed material the opening question drew on. `notice` is set only when
+    # none matched, and says that the question comes from general knowledge.
+    sources: List[SourceItem] = Field(default_factory=list)
+    notice: Optional[str] = None
 
 
 class InterviewRespondRequest(BaseModel):

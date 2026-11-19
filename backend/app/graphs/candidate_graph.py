@@ -156,6 +156,10 @@ class CandidateGraph:
 
         The roadmap needs to know what skills to teach (gap), so we always compute
         the gap first even if the caller only wants the plan.
+
+        Besides the weeks, the result carries `sources` (the reviewed pages the plan
+        links to) and `notice` (set when the plan is not based on any reviewed source),
+        both straight from the roadmap agent.
         """
         resume_skills = resume_data.get("skills", []) or []
         jd_skills = jd_data.get("skills_required", []) or []
@@ -172,4 +176,6 @@ class CandidateGraph:
             "target_role": target_role,
             "weeks": plan.get("weeks", []),
             "summary": plan.get("summary"),
+            "sources": plan.get("sources", []),
+            "notice": plan.get("notice"),
         }

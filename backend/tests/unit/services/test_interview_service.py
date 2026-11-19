@@ -2,7 +2,8 @@
 
 The agents, Redis and the four thin Postgres methods are all replaced with
 in-memory fakes, so these tests exercise the orchestration logic only:
-completion rules, ownership, cache-vs-DB history handling, feedback caching.
+completion rules, ownership, cache-vs-DB history handling, feedback caching, and
+the knowledge sources / notice that the opening question passes on to the app.
 """
 
 import uuid
@@ -22,12 +23,34 @@ USER_ID = str(uuid.uuid4())
 OTHER_USER_ID = str(uuid.uuid4())
 
 
+SOURCE = {
+    "title": "Behavioral interview guide",
+    "url": "https://example.com/behavioral",
+    "licence": "CC BY-NC-SA 4.0",
+    "attribution": "Behavioral interview guide (example.com)",
+}
+NOTICE = "Not based on our reviewed sources."
+
+
 class FakeInterviewer:
-    def __init__(self):
+    """Returns the same shape as InterviewAgent.start_session().
+
+    Set `sources` / `notice` to script a grounded or an ungrounded opening question.
+    """
+
+    def __init__(self, sources=None, notice=None):
+        self.sources = sources or []
+        self.notice = notice
         self.followup_calls: list[dict] = []
 
     async def start_session(self, company, role, max_questions=6):
-        return {"question": f"Opening for {role} at {company}", "used_rag": False}
+        return {
+            "question": f"Opening for {role} at {company}",
+            "session_started": True,
+            "grounded": bool(self.sources),
+            "sources": list(self.sources),
+            "notice": self.notice,
+        }
 
     async def followup(self, history, response, **kwargs):
         self.followup_calls.append({"history": list(history), **kwargs})
@@ -143,6 +166,68 @@ class TestStart:
         # Redis cache seeded too
         cached = await MemoryAgent(result["session_id"], client=redis).get_history()
         assert cached == svc.rows[sid]["history"]
+
+    @pytest.mark.asyncio
+    async def test_passes_sources_on_to_the_caller(self, svc):
+        svc.interviewer = FakeInterviewer(sources=[SOURCE])
+
+        result = await _start(svc)
+
+        assert result["sources"] == [SOURCE]
+        assert result["notice"] is None
+
+    @pytest.mark.asyncio
+    async def test_passes_the_notice_on_when_nothing_reviewed_matched(self, svc):
+        svc.interviewer = FakeInterviewer(notice=NOTICE)
+
+        result = await _start(svc)
+
+        assert result["sources"] == []
+        assert result["notice"] == NOTICE
+
+    @pytest.mark.asyncio
+    async def test_agent_result_without_sources_still_works(self, svc):
+        """An agent result with only a question gives an empty list and no notice."""
+
+        class BareInterviewer(FakeInterviewer):
+            async def start_session(self, company, role, max_questions=6):
+                return {"question": "Opening"}
+
+        svc.interviewer = BareInterviewer()
+
+        result = await _start(svc)
+
+        assert result["question"] == "Opening"
+        assert result["sources"] == []
+        assert result["notice"] is None
+
+    @pytest.mark.asyncio
+    async def test_sources_are_not_stored_with_the_session(self, svc, redis):
+        svc.interviewer = FakeInterviewer(sources=[SOURCE], notice=NOTICE)
+
+        result = await _start(svc)
+
+        sid = uuid.UUID(result["session_id"])
+        assert set(svc.rows[sid]) == {
+            "id",
+            "user_id",
+            "company",
+            "role",
+            "history",
+            "feedback",
+        }
+        cached = await MemoryAgent(result["session_id"], client=redis).get_history()
+        assert all(set(m) == {"role", "content"} for m in cached)
+
+    @pytest.mark.asyncio
+    async def test_later_responses_carry_no_sources(self, svc):
+        svc.interviewer = FakeInterviewer(sources=[SOURCE])
+        started = await _start(svc)
+
+        reply = await _answer(svc, started["session_id"])
+
+        assert "sources" not in reply
+        assert "notice" not in reply
 
     @pytest.mark.asyncio
     async def test_company_and_role_trimmed(self, svc):
