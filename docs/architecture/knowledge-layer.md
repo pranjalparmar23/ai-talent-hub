@@ -2,8 +2,8 @@
 
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, and how the pipeline, the licence gate and the source adapters fill the collections.
 
-**Tracker:** Phase 7, tasks 2 to 7. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate and two source adapters are built and unit tested (updated 2026-11-18). The tests use fakes: the first run against the real GitHub server and ChromaDB comes with task 8. No agent reads the new collections yet (tasks 9 and 11).
+**Tracker:** Phase 7, tasks 2 to 8. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). The tests use fakes: the first run against the real GitHub server and ChromaDB is still to do (see Decision 5). No agent reads the new collections yet (tasks 9 and 11).
 
 ---
 
@@ -17,6 +17,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 4 | Old data | Not migrated. It stays in the local snapshot and is deleted in task 15 after the new evaluation passes |
 | 5 | Licence policy | Allowlist of permissive licences for full text. Share-alike, unknown and restrictive licences are refused. Restrictive sources are link-only |
 | 6 | Where content comes from | One adapter per source. Pilot: Tech Interview Handbook (full text) and roadmap.sh (link only) |
+| 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). After each run, chunks of that source that are past `expires_at` are removed |
 
 ---
 
@@ -186,8 +187,66 @@ Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, w
 1. Vet it and record the verdict in `docs/mcp/vetting-log.md`.
 2. Read its licence file itself.
 3. Full text: add an adapter in `app/ingest/sources/` that returns a `SourceBatch`. Link only: add a YAML list and use `LinkOnlyAdapter`.
-4. Add it to `docs/attribution.md`.
-5. Add tests, then run a first ingest and check the stored credit line.
+4. Register it in `SOURCES` in `app/ingest/run.py`. List any MCP server it needs in `servers`.
+5. Add it to `docs/attribution.md`.
+6. Add tests. Run `python -m app.ingest.run --source <name> --dry-run`, then a real run, and check the stored credit line.
+
+---
+
+## Decision 5: the ingest command and expiry (task 8)
+
+Code: `app/ingest/run.py` (the command) and `app/ingest/expiry.py` (finding and removing expired chunks).
+
+```
+python -m app.ingest.run --source tech-interview-handbook --enable-server github
+python -m app.ingest.run --source roadmap-sh
+python -m app.ingest.run --source all --dry-run
+```
+
+Run it from `backend/`. ChromaDB must be running (`CHROMA_HOST` and `CHROMA_PORT` in `backend/.env`).
+
+### What one run does
+
+For each chosen source, in order:
+
+1. Ask the source adapter for its documents.
+2. Give them to the pipeline. (A dry run only checks the licence gate.)
+3. Remove that source's chunks that are past their expiry date.
+4. Print a report: fetched, added, updated, unchanged, refused, skipped, failed and expired, with the reason for anything refused, skipped or failed.
+
+A source that cannot be read is reported as `PROBLEM`. The other sources still run.
+
+### Options
+
+| Option | Effect |
+|---|---|
+| `--source NAME` or `--source all` | Required. `NAME` is `tech-interview-handbook` or `roadmap-sh` |
+| `--dry-run` | Fetch and check licences, and list expired chunks. Writes and deletes nothing, and creates no collections |
+| `--no-expire` | Do not remove expired chunks |
+| `--enable-server NAME` | Switch an MCP server on for this run only |
+
+Exit code: `0` when nothing failed, `1` when a document or a whole source failed (a refused document is not a failure), `2` for a bad argument or an unknown server name.
+
+### Expiry
+
+- A chunk is expired when its `expires_at_ts` is now or earlier.
+- Running a source refreshes the dates of every page that is still in it. Unchanged pages are not embedded again. So what gets removed is content that left the source, or that was not refreshed within its window (90 days by default).
+- Only the chunks of the source being run are removed, in both knowledge collections. Running `roadmap-sh` never removes handbook content. The old legacy collections are never touched.
+- The sweep is skipped when the source could not be read, so a temporary outage does not delete anything. A document that failed keeps its old chunks until they expire.
+- The retriever (task 9) must also ignore expired chunks when searching, because they stay stored until the next run of their source.
+
+### The `github` server stays off by default
+
+`github` is `enabled: false` in `mcp_servers.yaml`, and a test requires every bundled server to be off. `--enable-server github` switches it on for one run, in memory. The file is not changed. Without the flag, the handbook source stops at once and names the flag to use.
+
+### First real run of the handbook
+
+1. Put a read-only, fine-grained token in `backend/.env` as `GITHUB_PERSONAL_ACCESS_TOKEN`. Never commit it.
+2. `docker pull ghcr.io/github/github-mcp-server:v1.14.0`.
+3. `python -m app.ingest.run --source tech-interview-handbook --enable-server github --dry-run`. This reads from GitHub and writes nothing. On the copy checked on 2026-08-07 it gave 45 documents and 4 left out.
+4. Run it again without `--dry-run`, then a third time. The third run should report every document as `unchanged`.
+
+Stdio servers are refused in production (see `docs/architecture/mcp.md`, section 10), so run this from a development or CI machine.
 
 ---
 
@@ -197,7 +256,7 @@ Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, w
 |---|---|
 | 5 | **Built.** Pipeline writes `KnowledgeDoc` chunks with deterministic ids through `upsert_documents` |
 | 6, 7 | **Built.** Source adapters fill the fields. The licence gate checks `licence`, `attribution` and `ingest_mode` |
-| 8 | Refresh and expiry use `expires_at_ts` and `content_hash`. It also runs the adapters for real (`python -m app.ingest.run --source X`) |
+| 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. The first real run is still to do |
 | 9 | Retriever v2 filters on the fields above and returns `title`, `url`, `licence` and `attribution` as citations |
 | 11, 12 | The agents return `sources[]` built from the chunk metadata |
 | 13, 14 | The evaluation set and tests cover the filters, idempotency and the licence gate |
@@ -207,13 +266,13 @@ Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, w
 ## Findings from reading the code
 
 - `RetrieverAgent` (`agents/shared/retriever_agent.py`) is used nowhere and would fail if it were: it `await`s a function that is not async and passes `collection=` where the retriever expects `collection_name=`. Remove it, or fix it, during task 9.
-- ChromaDB's `$in` and numeric comparisons, and the new `upsert`, `update` and `delete` calls, are assumed to work as documented. The unit tests use a fake store. Task 14 proves them against the real client.
+- ChromaDB's `$in` and numeric comparisons (the expiry sweep sends `$lte` on `expires_at_ts`, with `$and` when limited to one source), and the new `upsert`, `update` and `delete` calls, are assumed to work as documented. The unit tests use a fake store. Task 14 proves them against the real client.
 
 ## Open items
 
-- Default `expires_at`: the adapters use 90 days for a static repository (`DEFAULT_EXPIRY`). Tune per source in task 8.
+- Default `expires_at`: the adapters use 90 days for a static repository (`DEFAULT_EXPIRY`). The ingest command has no option to change it yet. Add one per source if a source needs it.
 - **Share-alike licences** (CC-BY-SA) are refused for full text. Someone must decide whether we can accept them and what that means for our own content. To allow them, move their names from `NEEDS_DECISION` to `ALLOWED_FULL_TEXT` in `licence.py`.
-- The GitHub MCP server is only checked against an in-memory server (image tag, `stdio` subcommand, response shape, folder-listing format). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
+- The GitHub MCP server is only checked against an in-memory server (image tag, `stdio` subcommand, response shape, folder-listing format). The first real read is `python -m app.ingest.run --source tech-interview-handbook --enable-server github --dry-run` (Decision 5), and task 6 stays In Progress until it works. Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
 
 ## Changelog
@@ -222,3 +281,4 @@ Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, w
 |---|---|
 | 2026-11-10 | First version: schema, two-collection layout, embedding model kept |
 | 2026-11-18 | Added Decision 4: pipeline, licence gate and source adapters (tasks 5 to 7). Corrected the update rules to match the code. Updated status and open items |
+| 2026-11-19 | Added Decision 5: the ingest command and expiry sweep (task 8). Updated the status, the source checklist and the open items |
