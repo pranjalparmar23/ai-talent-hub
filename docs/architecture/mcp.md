@@ -177,7 +177,7 @@ The Phase 7 source adapters read files from public GitHub repositories through t
 - **Embedded resources:** the server returns file text inside an embedded resource, not as plain text. `_extract_text` in `gateway.py` keeps that text. Images and binary data are still ignored.
 - **Stricter than other callers:** ingestion must not store a wrong answer, so the reader refuses a failed call, an answer served from `stale_cache` (it would get today's date), a result the gateway cut at `max_result_chars` (the `github` entry allows 200000), and an empty reply.
 - **Licence first:** the adapter reads the repository's `LICENSE` file before any page, and stops if it is not what the vetting log expects.
-- **Not yet proven on the real server:** the image tag, the `stdio` subcommand, the response shape and the folder-listing format are checked only against an in-memory server. Confirm them on the first real run. Stdio is refused in production, so ingestion runs from a development or CI machine until the server is hosted over HTTP.
+- **Confirmed on the real server (2026-11-19):** the image `ghcr.io/github/github-mcp-server:v1.14.0` starts with `stdio --read-only --toolsets repos` through the gateway, and `get_file_contents` returns file text and folder listings that the gateway and `GatewayGitHubReader` read in full. A real ingest read all 45 Handbook pages this way. Stdio is refused in production, so ingestion runs from a development or CI machine until the server is hosted over HTTP.
 
 ## 11. What comes next
 

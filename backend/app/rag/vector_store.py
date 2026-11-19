@@ -149,13 +149,24 @@ class VectorStore:
         query_embedding: list[float],
         top_k: int = 5,
         where: dict | None = None,
+        include_embeddings: bool = False,
     ) -> list[dict]:
+        """Nearest chunks to a vector. Each row has id, document, metadata, distance.
+
+        With `include_embeddings=True` each row also has the stored `embedding`
+        (a list of floats). The retriever needs it to pick varied results (MMR).
+        """
         collection = cls._get_collection_by_name(collection_name)
+
+        include = ["documents", "metadatas", "distances"]
+        if include_embeddings:
+            include.append("embeddings")
 
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
             where=where,
+            include=include,
         )
 
         ids = results.get("ids", [[]])[0]
@@ -163,10 +174,19 @@ class VectorStore:
         metas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
 
-        return [
-            {"id": i, "document": d, "metadata": m or {}, "distance": dist}
-            for i, d, m, dist in zip(ids, docs, metas, distances)
-        ]
+        vectors = None
+        if include_embeddings:
+            embeddings = results.get("embeddings")
+            if embeddings is not None and len(embeddings) > 0:
+                vectors = embeddings[0]
+
+        rows = []
+        for n, (i, d, m, dist) in enumerate(zip(ids, docs, metas, distances)):
+            row = {"id": i, "document": d, "metadata": m or {}, "distance": dist}
+            if vectors is not None:
+                row["embedding"] = [float(x) for x in vectors[n]]
+            rows.append(row)
+        return rows
 
     @classmethod
     def count(cls, collection_name: str) -> int:

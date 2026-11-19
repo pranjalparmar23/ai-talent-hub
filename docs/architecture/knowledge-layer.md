@@ -2,8 +2,8 @@
 
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, and how the pipeline, the licence gate and the source adapters fill the collections.
 
-**Tracker:** Phase 7, tasks 2 to 8. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). The tests use fakes: the first run against the real GitHub server and ChromaDB is still to do (see Decision 5). No agent reads the new collections yet (tasks 9 and 11).
+**Tracker:** Phase 7, tasks 2 to 9. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The unit tests still use fakes. The retriever can search them (task 9, Decision 6), but no agent uses it yet (task 11).
 
 ---
 
@@ -18,6 +18,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 5 | Licence policy | Allowlist of permissive licences for full text. Share-alike, unknown and restrictive licences are refused. Restrictive sources are link-only |
 | 6 | Where content comes from | One adapter per source. Pilot: Tech Interview Handbook (full text) and roadmap.sh (link only) |
 | 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). After each run, chunks of that source that are past `expires_at` are removed |
+| 8 | How content is found | `RAGRetriever.search()`: filters in ChromaDB, skips expired chunks, drops weak matches, avoids near-duplicates, returns citations. Details in Decision 6 below |
 
 ---
 
@@ -63,7 +64,7 @@ Every document field except `text` and the ISO times, plus:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `doc_id` | text | First 16 hex characters of SHA-256 over `source_id`, `|` and `url` |
+| `doc_id` | text | First 16 hex characters of SHA-256 over `source_id`, `\|` and `url` |
 | `chunk_index` | whole number | Position in the document |
 | `schema_version` | whole number | `2` for this layout |
 | `embedding_model` | text | The model that produced the vector |
@@ -233,7 +234,7 @@ Exit code: `0` when nothing failed, `1` when a document or a whole source failed
 - Running a source refreshes the dates of every page that is still in it. Unchanged pages are not embedded again. So what gets removed is content that left the source, or that was not refreshed within its window (90 days by default).
 - Only the chunks of the source being run are removed, in both knowledge collections. Running `roadmap-sh` never removes handbook content. The old legacy collections are never touched.
 - The sweep is skipped when the source could not be read, so a temporary outage does not delete anything. A document that failed keeps its old chunks until they expire.
-- The retriever (task 9) must also ignore expired chunks when searching, because they stay stored until the next run of their source.
+- The retriever ignores expired chunks when searching (Decision 6), because they stay stored until the next run of their source.
 
 ### The `github` server stays off by default
 
@@ -246,7 +247,91 @@ Exit code: `0` when nothing failed, `1` when a document or a whole source failed
 3. `python -m app.ingest.run --source tech-interview-handbook --enable-server github --dry-run`. This reads from GitHub and writes nothing. On the copy checked on 2026-08-07 it gave 45 documents and 4 left out.
 4. Run it again without `--dry-run`, then a third time. The third run should report every document as `unchanged`.
 
+Done on 2026-11-19. The repeat run reported 45 documents `unchanged`, 4 left out, 0 refused and 0 failed.
+
 Stdio servers are refused in production (see `docs/architecture/mcp.md`, section 10), so run this from a development or CI machine.
+
+---
+
+## Decision 6: retrieval (task 9)
+
+Code: `app/rag/retriever.py` (`RAGRetriever.search()`), `app/rag/ranking.py` (variety) and `VectorStore.query` in `app/rag/vector_store.py`.
+
+```python
+result = RAGRetriever().search(
+    "tell me about a time you led a project",
+    "interview_knowledge",
+    role_family="technical",
+    level="mid",
+)
+result.chunks      # best match first: .text, .similarity, .metadata, .citation
+result.citations   # one {title, url, licence, attribution} per page
+result.empty       # True when nothing usable was found
+```
+
+`search()` is the way to read the two knowledge collections. The old `retrieve()` stays until task 11 moves the agents over, and task 15 removes it.
+
+### What one search does
+
+1. Check the arguments. A typo is an error, not an empty result.
+2. Build the filter (below) and ask ChromaDB for several times `top_k` candidates (4 times, and at least 20), because some will be dropped.
+3. Drop candidates below the similarity cutoff.
+4. Pick `top_k` of the rest, best first but varied (MMR), with at most 2 chunks from one page.
+5. Return the chunks with their citations and counts, and log the counts and the time taken.
+
+### The filter
+
+Always applied:
+
+- `schema_version` is the current one. Chunks written with an older schema are never returned.
+- `expires_at_ts` is later than now. Expired chunks stay stored until the next ingest run of their source, so the retriever has to skip them itself.
+
+Optional, each one narrows the search:
+
+| Argument | Matches |
+|---|---|
+| `domain` | that domain, or `general` |
+| `role_family` | that value, or `all` |
+| `level` | that value, or `all` |
+| `content_type` | one type or a list of types. Each must belong to the collection being searched |
+
+Content marked `all` or `general` fits any request, so a general interview question is not hidden from a "technical, mid" search.
+
+### Defaults
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `top_k` | 5 | Results returned |
+| `min_similarity` | 0.30 | Below this a match is noise. It is the cutoff the agents use today |
+| `mmr` | on | Pick varied results. `mmr=False` gives plain best-first |
+| `mmr_lambda` | 0.7 | 1.0 means only relevance, 0.0 means only variety |
+| `max_per_doc` | 2 | Most chunks one page may supply. `None` or `0` switches it off |
+| candidates fetched | 4 x `top_k`, at least 20 | Extra candidates so the cutoff and variety have something to choose from |
+
+These are starting values. Task 13 (the golden set) tunes them.
+
+### The result
+
+`SearchResult` has `chunks`, `citations` and `empty`, plus two counts that say why a result is empty:
+
+- `candidates` is how many chunks passed the filters.
+- `below_cutoff` is how many of those were dropped as weak.
+
+Empty with `candidates` 0 means nothing matched the filters (for example a domain with no content). Empty with `below_cutoff` above 0 means chunks matched, but weakly. Task 10 (live lookup) and the empty-retrieval metric use this.
+
+### Why these choices
+
+- Similarity is `1 - distance`. That is correct because the collections use cosine distance.
+- MMR is there because the handbook pages overlap. Without it the top 5 can be five near-copies of one idea.
+- The per-page limit stops one long page from filling the whole result.
+- The ranking maths is plain Python. It only ever handles about 20 vectors, so it needs no numpy.
+- ChromaDB returns the stored vectors on request (`include_embeddings`), so nothing is embedded a second time.
+
+### What it does not do
+
+- It searches one collection per call. A caller that wants both makes two calls.
+- It does not look anything up live when the result is empty. That is task 10.
+- It is vector search only (no keyword search), and English only, because of the embedding model.
 
 ---
 
@@ -256,8 +341,8 @@ Stdio servers are refused in production (see `docs/architecture/mcp.md`, section
 |---|---|
 | 5 | **Built.** Pipeline writes `KnowledgeDoc` chunks with deterministic ids through `upsert_documents` |
 | 6, 7 | **Built.** Source adapters fill the fields. The licence gate checks `licence`, `attribution` and `ingest_mode` |
-| 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. The first real run is still to do |
-| 9 | Retriever v2 filters on the fields above and returns `title`, `url`, `licence` and `attribution` as citations |
+| 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. Both sources ran for real on 2026-11-19 |
+| 9 | **Built.** Retriever v2 (`RAGRetriever.search()`) filters on the fields above, skips expired chunks, and returns `title`, `url`, `licence` and `attribution` as citations |
 | 11, 12 | The agents return `sources[]` built from the chunk metadata |
 | 13, 14 | The evaluation set and tests cover the filters, idempotency and the licence gate |
 
@@ -265,15 +350,17 @@ Stdio servers are refused in production (see `docs/architecture/mcp.md`, section
 
 ## Findings from reading the code
 
-- `RetrieverAgent` (`agents/shared/retriever_agent.py`) is used nowhere and would fail if it were: it `await`s a function that is not async and passes `collection=` where the retriever expects `collection_name=`. Remove it, or fix it, during task 9.
-- ChromaDB's `$in` and numeric comparisons (the expiry sweep sends `$lte` on `expires_at_ts`, with `$and` when limited to one source), and the new `upsert`, `update` and `delete` calls, are assumed to work as documented. The unit tests use a fake store. Task 14 proves them against the real client.
+- `RetrieverAgent` (`agents/shared/retriever_agent.py`) was used nowhere and could not have worked: it `await`ed a function that is not async and passed `collection=` where the retriever expects `collection_name=`. Removed in task 9.
+- The real ingest runs on 2026-11-19 worked with ChromaDB's `upsert`, `get` with `where`, and `update` calls, and ChromaDB accepted the expiry filter (`$lte` on `expires_at_ts`, inside `$and` for one source). That filter matched nothing so far, and `delete` has not run for real. The retriever's filters (`$in`, `$gt`, `$and`) and the `embeddings` option were checked against an in-memory ChromaDB 0.5.23 (the version this project pins), which also ran the expiry sweep end to end. They have not yet run against the ChromaDB container with the real embedding model. The unit tests use a fake store. Task 14 proves all of this against the real client.
 
 ## Open items
 
 - Default `expires_at`: the adapters use 90 days for a static repository (`DEFAULT_EXPIRY`). The ingest command has no option to change it yet. Add one per source if a source needs it.
 - **Share-alike licences** (CC-BY-SA) are refused for full text. Someone must decide whether we can accept them and what that means for our own content. To allow them, move their names from `NEEDS_DECISION` to `ALLOWED_FULL_TEXT` in `licence.py`.
-- The GitHub MCP server is only checked against an in-memory server (image tag, `stdio` subcommand, response shape, folder-listing format). The first real read is `python -m app.ingest.run --source tech-interview-handbook --enable-server github --dry-run` (Decision 5), and task 6 stays In Progress until it works. Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
+- The GitHub MCP server was confirmed on a real run on 2026-11-19 (image tag, `stdio` subcommand, response shape, folder listing). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
+- The retrieval defaults (cutoff 0.30, variety 0.7, 2 chunks per page) are starting values. Task 13 tunes them against the golden set.
+- `search()` reads one collection per call and has no live fallback. Task 10 adds the fallback for empty results.
 
 ## Changelog
 
@@ -282,3 +369,5 @@ Stdio servers are refused in production (see `docs/architecture/mcp.md`, section
 | 2026-11-10 | First version: schema, two-collection layout, embedding model kept |
 | 2026-11-18 | Added Decision 4: pipeline, licence gate and source adapters (tasks 5 to 7). Corrected the update rules to match the code. Updated status and open items |
 | 2026-11-19 | Added Decision 5: the ingest command and expiry sweep (task 8). Updated the status, the source checklist and the open items |
+| 2026-11-19 | Recorded the first real ingest of both sources (45 Handbook pages, 41 roadmap.sh links) and what it confirmed about the GitHub server and ChromaDB |
+| 2026-11-19 | Added Decision 6: retrieval (task 9). Marked task 9 built, removed the `RetrieverAgent` finding, and added two open items |

@@ -52,7 +52,9 @@ servers:
   #     (a fine-grained, read-only token for public repos). The gateway refuses stdio
   #     when APP_ENV=production; hosting it over HTTP is still an open follow-up.
   #   • The image tag is pinned. Read the v2 notes before changing it.
-  #   • Turn it on only when you run an ingest: set `enabled: true`.
+  #   • Off by default. An ingest turns it on for one run only:
+  #     `python -m app.ingest.run --source X --enable-server github`.
+  #     Do not set `enabled: true` here (a test requires every server off).
   #   • Sized for ingestion: Handbook pages reach about 25,000 characters and a
   #     folder listing is longer, so max_result_chars is raised; 60 s covers the
   #     container start; 120 calls a minute covers about 50 pages plus folders.
