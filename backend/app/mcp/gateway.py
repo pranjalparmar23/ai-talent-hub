@@ -6,9 +6,7 @@ Rules the gateway enforces for every call:
 - one timeout per attempt, a few retries with backoff for connection problems;
 - a per-server rate limit and a circuit breaker so a dead server costs one timeout,
   not one timeout per interview turn;
-- results are cleaned, size-capped and cached; stale cache is served if the server fails.
-  A server with `cache: false` in the registry is never cached: no fresh copy, no stale
-  copy (for sources whose terms do not allow keeping their output);
+- results are cleaned, size-capped and cached; stale cache is served if the server fails;
 - **it never raises for operational problems.** A failure comes back as
   `ToolResult(ok=False, ...)`. MCP data is enrichment only — interviews and roadmaps
   must keep working when a server is down.
@@ -283,7 +281,7 @@ class MCPGateway:
         self, cfg: ServerConfig, tool: str, key: str, code: str, msg: str
     ) -> ToolResult:
         """Server unusable right now: serve stale cache if we have it, else report failure."""
-        hit = self.cache.get(key, allow_stale=True) if cfg.cache else None
+        hit = self.cache.get(key, allow_stale=True)
         if hit is not None:
             text, truncated = hit[0]
             return ToolResult(
@@ -346,7 +344,7 @@ class MCPGateway:
             return self._fail(cfg, tool, INVALID_ARGUMENTS, str(exc))
 
         key = make_key(server, tool, arguments)
-        fresh = self.cache.get(key) if cfg.cache else None
+        fresh = self.cache.get(key)
         if fresh is not None:
             text, truncated = fresh[0]
             return ToolResult(
@@ -387,13 +385,12 @@ class MCPGateway:
             else:
                 text, truncated = security.clean_text(raw, cfg.max_result_chars)
                 self._record_success(server)
-                if cfg.cache:
-                    self.cache.put(
-                        key,
-                        (text, truncated),
-                        ttl=cfg.cache_ttl_seconds,
-                        stale_ttl=cfg.stale_ttl_seconds,
-                    )
+                self.cache.put(
+                    key,
+                    (text, truncated),
+                    ttl=cfg.cache_ttl_seconds,
+                    stale_ttl=cfg.stale_ttl_seconds,
+                )
                 return ToolResult(
                     ok=True,
                     server=server,
