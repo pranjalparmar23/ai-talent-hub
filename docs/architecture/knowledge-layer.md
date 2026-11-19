@@ -3,7 +3,7 @@
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, and how the pipeline, the licence gate and the source adapters fill the collections.
 
 **Tracker:** Phase 7, tasks 2 to 8. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). The tests use fakes: the first run against the real GitHub server and ChromaDB is still to do (see Decision 5). No agent reads the new collections yet (tasks 9 and 11).
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The unit tests still use fakes. No agent reads the new collections yet (tasks 9 and 11).
 
 ---
 
@@ -246,8 +246,9 @@ Exit code: `0` when nothing failed, `1` when a document or a whole source failed
 3. `python -m app.ingest.run --source tech-interview-handbook --enable-server github --dry-run`. This reads from GitHub and writes nothing. On the copy checked on 2026-08-07 it gave 45 documents and 4 left out.
 4. Run it again without `--dry-run`, then a third time. The third run should report every document as `unchanged`.
 
-Stdio servers are refused in production (see `docs/architecture/mcp.md`, section 10), so run this from a development or CI machine.
+Done on 2026-11-19. The repeat run reported 45 documents `unchanged`, 4 left out, 0 refused and 0 failed.
 
+Stdio servers are refused in production (see `docs/architecture/mcp.md`, section 10), so run this from a development or CI machine.
 ---
 
 ## What the rest of Phase 7 builds on this
@@ -256,7 +257,7 @@ Stdio servers are refused in production (see `docs/architecture/mcp.md`, section
 |---|---|
 | 5 | **Built.** Pipeline writes `KnowledgeDoc` chunks with deterministic ids through `upsert_documents` |
 | 6, 7 | **Built.** Source adapters fill the fields. The licence gate checks `licence`, `attribution` and `ingest_mode` |
-| 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. The first real run is still to do |
+| 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. Both sources ran for real on 2026-11-19 |
 | 9 | Retriever v2 filters on the fields above and returns `title`, `url`, `licence` and `attribution` as citations |
 | 11, 12 | The agents return `sources[]` built from the chunk metadata |
 | 13, 14 | The evaluation set and tests cover the filters, idempotency and the licence gate |
@@ -266,13 +267,13 @@ Stdio servers are refused in production (see `docs/architecture/mcp.md`, section
 ## Findings from reading the code
 
 - `RetrieverAgent` (`agents/shared/retriever_agent.py`) is used nowhere and would fail if it were: it `await`s a function that is not async and passes `collection=` where the retriever expects `collection_name=`. Remove it, or fix it, during task 9.
-- ChromaDB's `$in` and numeric comparisons (the expiry sweep sends `$lte` on `expires_at_ts`, with `$and` when limited to one source), and the new `upsert`, `update` and `delete` calls, are assumed to work as documented. The unit tests use a fake store. Task 14 proves them against the real client.
+- The real ingest runs on 2026-11-19 worked with ChromaDB's `upsert`, `get` with `where`, and `update` calls, and ChromaDB accepted the expiry filter (`$lte` on `expires_at_ts`, inside `$and` for one source). That filter matched nothing so far, and `delete` has not run for real. ChromaDB's `$in` filter, which the retriever will use, is also not yet tried. The unit tests use a fake store. Task 14 proves these against the real client.
 
 ## Open items
 
 - Default `expires_at`: the adapters use 90 days for a static repository (`DEFAULT_EXPIRY`). The ingest command has no option to change it yet. Add one per source if a source needs it.
 - **Share-alike licences** (CC-BY-SA) are refused for full text. Someone must decide whether we can accept them and what that means for our own content. To allow them, move their names from `NEEDS_DECISION` to `ALLOWED_FULL_TEXT` in `licence.py`.
-- The GitHub MCP server is only checked against an in-memory server (image tag, `stdio` subcommand, response shape, folder-listing format). The first real read is `python -m app.ingest.run --source tech-interview-handbook --enable-server github --dry-run` (Decision 5), and task 6 stays In Progress until it works. Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
+- The GitHub MCP server was confirmed on a real run on 2026-11-19 (image tag, `stdio` subcommand, response shape, folder listing). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
 
 ## Changelog
@@ -282,3 +283,4 @@ Stdio servers are refused in production (see `docs/architecture/mcp.md`, section
 | 2026-11-10 | First version: schema, two-collection layout, embedding model kept |
 | 2026-11-18 | Added Decision 4: pipeline, licence gate and source adapters (tasks 5 to 7). Corrected the update rules to match the code. Updated status and open items |
 | 2026-11-19 | Added Decision 5: the ingest command and expiry sweep (task 8). Updated the status, the source checklist and the open items |
+| 2026-11-19 | Recorded the first real ingest of both sources (45 Handbook pages, 41 roadmap.sh links) and what it confirmed about the GitHub server and ChromaDB |
