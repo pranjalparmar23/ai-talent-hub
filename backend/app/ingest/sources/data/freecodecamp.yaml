@@ -2,9 +2,9 @@
 #
 # freeCodeCamp is a free, non-profit learning site with a course curriculum, a large
 # library of articles, and a YouTube channel of long video courses. The vetting log
-# (docs/mcp/vetting-log.md) approves it for LINKS only: its articles belong to their
-# authors, so we copy nothing. Each entry is a link, a title, and one plain sentence
-# that we wrote ourselves.
+# (docs/mcp/vetting-log.md) approves it for LINKS only. Its licences and terms are not
+# all confirmed (the log lists what is unread), so we copy nothing: each entry is a
+# link, a title, and one plain sentence that we wrote ourselves.
 #
 # Three kinds of link, each with its own content type:
 #   course  the hands-on curriculum at /learn (a learner works through it in the browser)
