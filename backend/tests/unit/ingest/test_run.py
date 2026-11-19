@@ -11,6 +11,7 @@ import types
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import yaml
 
 from app.ingest import pipeline as pipeline_module
 from app.ingest import run as run_module
@@ -27,6 +28,7 @@ from app.ingest.run import (
     run_source,
 )
 from app.ingest.expiry import ExpiredDoc, ExpiryReport
+from app.ingest.linkcheck import LinkResult, LinkStatus
 from app.ingest.schema import INTERVIEW_COLLECTION, LEARNING_COLLECTION, KnowledgeDoc
 from app.ingest.sources.base import SourceBatch, SourceError, Skipped
 from app.mcp.config import load_registry
@@ -119,7 +121,7 @@ def gateway(**servers):
     return types.SimpleNamespace(registry=registry)
 
 
-def spec(adapter, name="src-a", servers=()):
+def spec(adapter, name="src-a", servers=(), link_only=False):
     built = []
 
     def build(gw):
@@ -129,7 +131,7 @@ def spec(adapter, name="src-a", servers=()):
         return adapter
 
     build.built = built  # type: ignore[attr-defined]  # which gateways it got
-    return SourceSpec(name, build, servers=tuple(servers))
+    return SourceSpec(name, build, servers=tuple(servers), link_only=link_only)
 
 
 def call(s, *, pipeline=None, store=None, gw=None, **kwargs):
@@ -414,6 +416,387 @@ async def test_run_all_passes_its_options_to_every_source():
     assert store.filters == []
 
 
+# ── link sources: the link check ─────────────────────────────
+
+
+def link_doc(path: str, source_id="links-a") -> KnowledgeDoc:
+    """A link-only learning document for https://example.com/<path>."""
+    return doc(
+        url=f"https://example.com/{path}",
+        source_id=source_id,
+        content_type="course",
+        ingest_mode="link_only",
+        licence="proprietary",
+        text="A course. A short sentence we wrote ourselves.",
+    )
+
+
+def link_spec(*paths, name="links-a", source_id=None):
+    adapter = FakeAdapter(
+        [link_doc(p, source_id or name) for p in paths], source_id=source_id or name
+    )
+    return spec(adapter, name=name, link_only=True), adapter
+
+
+def answer(url, status, reason="", code=None) -> LinkResult:
+    return LinkResult(url, status, reason, code)
+
+
+class FakeChecker:
+    """Stands in for check_links. `known` maps a path to a LinkResult status; any
+    other path is ok. Records every call."""
+
+    def __init__(self, known=None, error=None):
+        self.known = known or {}
+        self.error = error
+        self.calls: list[list[str]] = []
+
+    async def __call__(self, urls):
+        urls = list(urls)
+        self.calls.append(urls)
+        if self.error:
+            raise self.error
+        out = {}
+        for url in urls:
+            path = url.rsplit("/", 1)[-1]
+            status, reason, code = self.known.get(path, (LinkStatus.OK, "", 200))
+            out[url] = answer(url, status, reason, code)
+        return out
+
+
+GONE = (LinkStatus.BROKEN, "HTTP 404", 404)
+BLOCKED = (LinkStatus.UNKNOWN, "HTTP 403", 403)
+
+
+def stored_chunk(store, document: KnowledgeDoc, index=0):
+    """Put one stored chunk of `document` into the fake store."""
+    store.add(
+        LEARNING_COLLECTION,
+        f"{document.doc_id}:{index:04d}",
+        doc_id=document.doc_id,
+        source_id=document.source_id,
+        url=document.url,
+    )
+
+
+async def test_a_source_that_is_not_a_link_source_is_not_checked():
+    checker = FakeChecker()
+    result = await call(spec(FakeAdapter([doc()])), link_checker=checker)
+    assert checker.calls == []
+    assert result.link_counts is None
+    assert result.link_note == ""
+
+
+async def test_a_link_source_gets_every_address_checked_once():
+    checker = FakeChecker()
+    s, _ = link_spec("a", "b", "c")
+    result = await call(s, link_checker=checker)
+    assert checker.calls == [
+        ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
+    ]
+    assert result.link_counts == {"ok": 3, "broken": 0, "unknown": 0}
+    assert result.ok
+
+
+async def test_a_broken_link_is_left_out_but_the_others_are_stored():
+    checker = FakeChecker({"b": GONE})
+    pipe = FakePipeline()
+    s, _ = link_spec("a", "b", "c")
+    result = await call(s, pipeline=pipe, link_checker=checker)
+    assert [d.url for d in pipe.batches[0]] == [
+        "https://example.com/a",
+        "https://example.com/c",
+    ]
+    assert result.docs_fetched == 3  # what the adapter gave, before the check
+    assert result.link_counts == {"ok": 2, "broken": 1, "unknown": 0}
+    assert [r.url for r in result.links_broken] == ["https://example.com/b"]
+
+
+async def test_a_link_that_cannot_be_judged_is_kept_and_reported():
+    checker = FakeChecker({"a": BLOCKED})
+    pipe = FakePipeline()
+    s, _ = link_spec("a", "b")
+    result = await call(s, pipeline=pipe, link_checker=checker)
+    assert len(pipe.batches[0]) == 2
+    assert result.link_counts == {"ok": 1, "broken": 0, "unknown": 1}
+    assert [r.reason for r in result.links_unknown] == ["HTTP 403"]
+    assert result.links_broken == []
+
+
+async def test_a_run_with_broken_links_is_still_ok():
+    s, _ = link_spec("a", "b")
+    result = await call(s, link_checker=FakeChecker({"a": GONE, "b": GONE}))
+    assert result.ok
+    assert result.error == ""
+
+
+async def test_when_every_link_is_broken_the_pipeline_gets_an_empty_batch():
+    pipe = FakePipeline()
+    s, _ = link_spec("a")
+    result = await call(s, pipeline=pipe, link_checker=FakeChecker({"a": GONE}))
+    assert pipe.batches == [[]]
+    assert result.ok
+
+
+async def test_stored_chunks_of_a_broken_link_are_removed():
+    store = AdminStore()
+    s, adapter = link_spec("a", "b")
+    gone, fine = adapter.docs[0], adapter.docs[1]
+    stored_chunk(store, gone, 0)
+    stored_chunk(store, gone, 1)
+    stored_chunk(store, fine, 0)
+
+    result = await call(s, store=store, link_checker=FakeChecker({"a": GONE}))
+
+    assert result.stale_chunks == 2
+    assert store.deletes == [
+        (LEARNING_COLLECTION, [f"{gone.doc_id}:0000", f"{gone.doc_id}:0001"])
+    ]
+    assert list(store.collections[LEARNING_COLLECTION]) == [f"{fine.doc_id}:0000"]
+
+
+async def test_a_broken_link_that_was_never_stored_deletes_nothing():
+    store = AdminStore()
+    s, _ = link_spec("a")
+    result = await call(s, store=store, link_checker=FakeChecker({"a": GONE}))
+    assert result.stale_chunks == 0
+    assert store.deletes == []
+
+
+async def test_a_link_that_cannot_be_judged_keeps_its_stored_chunks():
+    store = AdminStore()
+    s, adapter = link_spec("a")
+    stored_chunk(store, adapter.docs[0])
+    await call(s, store=store, link_checker=FakeChecker({"a": BLOCKED}))
+    assert store.deletes == []
+    assert len(store.collections[LEARNING_COLLECTION]) == 1
+
+
+async def test_a_dry_run_counts_stale_chunks_and_deletes_nothing():
+    store = AdminStore()
+    s, adapter = link_spec("a", "b")
+    stored_chunk(store, adapter.docs[0])
+    pipe = FakePipeline()
+
+    result = await call(
+        s,
+        pipeline=pipe,
+        store=store,
+        dry_run=True,
+        link_checker=FakeChecker({"a": GONE}),
+    )
+
+    assert result.stale_chunks == 1
+    assert store.deletes == []
+    assert len(store.collections[LEARNING_COLLECTION]) == 1
+    assert pipe.batches == []
+    assert result.would_store == 1  # the broken link is not counted
+
+
+async def test_a_dry_run_before_the_collections_exist_looks_nothing_up():
+    store = AdminStore(existing=[])
+    s, _ = link_spec("a")
+    result = await call(
+        s,
+        store=store,
+        dry_run=True,
+        expire=False,
+        link_checker=FakeChecker({"a": GONE}),
+    )
+    assert result.stale_chunks == 0
+    assert store.filters == []
+    assert result.link_counts == {"ok": 0, "broken": 1, "unknown": 0}
+
+
+async def test_failing_to_remove_stored_chunks_is_a_problem_of_the_run():
+    class BrokenStore(AdminStore):
+        def get_by_where(self, collection_name, where):
+            raise ConnectionError("chroma went away")
+
+    s, _ = link_spec("a")
+    result = await call(
+        s, store=BrokenStore(), expire=False, link_checker=FakeChecker({"a": GONE})
+    )
+    assert not result.ok
+    assert "could not remove stored copies of broken links" in result.error
+    assert "chroma went away" in result.error
+
+
+async def test_no_link_check_skips_the_check_and_says_so():
+    checker = FakeChecker({"a": GONE})
+    pipe = FakePipeline()
+    s, _ = link_spec("a", "b")
+    result = await call(s, pipeline=pipe, link_check=False, link_checker=checker)
+    assert checker.calls == []
+    assert len(pipe.batches[0]) == 2
+    assert result.link_counts is None
+    assert result.link_note == "not checked (--no-link-check)"
+
+
+async def test_no_link_check_says_nothing_for_a_source_that_is_not_links():
+    result = await call(spec(FakeAdapter([doc()])), link_check=False)
+    assert result.link_note == ""
+
+
+async def test_a_link_check_that_crashes_drops_nothing():
+    pipe = FakePipeline()
+    s, _ = link_spec("a", "b")
+    checker = FakeChecker(error=RuntimeError("no resolver"))
+    result = await call(s, pipeline=pipe, link_checker=checker)
+    assert len(pipe.batches[0]) == 2
+    assert result.ok
+    assert result.link_counts is None
+    assert result.link_note == "not checked: RuntimeError: no resolver"
+
+
+async def test_a_source_with_no_documents_is_not_sent_to_the_checker():
+    checker = FakeChecker()
+    s, _ = link_spec()
+    await call(s, link_checker=checker)
+    assert checker.calls == []
+
+
+async def test_a_link_source_shares_the_address_set_it_is_given():
+    shared: set[str] = set()
+    s, adapter = link_spec("a")
+    await call(s, link_checker=FakeChecker(), seen_urls=shared)
+    assert adapter.seen_urls is shared
+
+
+async def test_a_source_that_is_not_links_is_not_given_the_address_set():
+    adapter = FakeAdapter([doc()])
+    await call(spec(adapter), seen_urls=set())
+    assert not hasattr(adapter, "seen_urls")
+
+
+def write_links(tmp_path, source_id, *paths):
+    path = tmp_path / f"{source_id}.yaml"
+    data = {
+        "source_id": source_id,
+        "licence": "proprietary",
+        "attribution": "Example. Link only: no content is copied.",
+        "content_type": "course",
+        "entries": [
+            {
+                "url": f"https://example.com/{p}",
+                "title": f"Page {p}",
+                "domain": "software-engineering",
+                "role_family": "technical",
+                "summary": "A short sentence we wrote.",
+            }
+            for p in paths
+        ],
+    }
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    return path
+
+
+async def test_two_lists_naming_the_same_page_store_it_once(tmp_path):
+    from app.ingest.sources.link_only import LinkOnlyAdapter
+
+    first = write_links(tmp_path, "first", "a", "shared")
+    second = write_links(tmp_path, "second", "shared", "b")
+    specs = [
+        SourceSpec("first", lambda gw: LinkOnlyAdapter(first), link_only=True),
+        SourceSpec("second", lambda gw: LinkOnlyAdapter(second), link_only=True),
+    ]
+    checker = FakeChecker()
+    pipe = FakePipeline()
+
+    runs = await run_all(
+        specs,
+        gateway=gateway(),
+        pipeline=pipe,
+        store=AdminStore(),
+        expire=False,
+        link_checker=checker,
+    )
+
+    assert [sorted(d.url.rsplit("/", 1)[-1] for d in b) for b in pipe.batches] == [
+        ["a", "shared"],
+        ["b"],
+    ]
+    assert len(runs[1].adapter_skipped) == 1
+    assert "listed by another source" in runs[1].adapter_skipped[0].reason
+    # the shared page was asked about once, by the first list
+    asked = [u for call_ in checker.calls for u in call_]
+    assert asked.count("https://example.com/shared") == 1
+
+
+async def test_each_run_all_call_starts_with_an_empty_address_set(tmp_path):
+    from app.ingest.sources.link_only import LinkOnlyAdapter
+
+    path = write_links(tmp_path, "only", "a")
+    s = SourceSpec("only", lambda gw: LinkOnlyAdapter(path), link_only=True)
+    for _ in range(2):
+        pipe = FakePipeline()
+        await run_all(
+            [s],
+            gateway=gateway(),
+            pipeline=pipe,
+            store=AdminStore(),
+            expire=False,
+            link_checker=FakeChecker(),
+        )
+        assert len(pipe.batches[0]) == 1
+
+
+async def test_run_all_passes_the_link_options_to_every_source():
+    checker = FakeChecker()
+    first, _ = link_spec("a", name="one")
+    second, _ = link_spec("b", name="two")
+    await run_all(
+        [first, second],
+        gateway=gateway(),
+        pipeline=FakePipeline(),
+        store=AdminStore(),
+        expire=False,
+        link_checker=checker,
+    )
+    assert len(checker.calls) == 2
+
+    again = FakeChecker()
+    runs = await run_all(
+        [first, second],
+        gateway=gateway(),
+        pipeline=FakePipeline(),
+        store=AdminStore(),
+        expire=False,
+        link_check=False,
+        link_checker=again,
+    )
+    assert again.calls == []
+    assert [r.link_note for r in runs] == ["not checked (--no-link-check)"] * 2
+
+
+# ── the sources that ship with the code ──────────────────────
+
+LINK_SOURCES = ("roadmap-sh", "official-docs", "freecodecamp")
+
+
+def test_the_link_sources_are_registered_after_the_handbook_in_this_order():
+    names = list(run_module.SOURCES)
+    assert names == ["tech-interview-handbook", *LINK_SOURCES]
+
+
+def test_only_the_link_sources_get_the_link_check():
+    flags = {n: s.link_only for n, s in run_module.SOURCES.items()}
+    assert flags == {
+        "tech-interview-handbook": False,
+        "roadmap-sh": True,
+        "official-docs": True,
+        "freecodecamp": True,
+    }
+
+
+@pytest.mark.parametrize("name", LINK_SOURCES)
+def test_each_link_source_builds_its_own_list_without_a_server(name):
+    source = run_module.SOURCES[name]
+    assert source.servers == ()
+    adapter = source.build(gateway())
+    assert adapter.source_id == name
+
+
 # ── the report ───────────────────────────────────────────────
 
 
@@ -524,6 +907,115 @@ def test_a_real_run_report_shows_how_many_chunks_were_removed():
     assert "expired:  1 documents removed (2 chunks)" in text
 
 
+# ── the report: link check ───────────────────────────────────
+
+
+def links_run(**over) -> SourceRun:
+    base = dict(
+        source="links-a",
+        docs_fetched=4,
+        summary=summary(("u1", ADDED, "")),
+        expiry=ExpiryReport(),
+        link_counts={"ok": 2, "broken": 1, "unknown": 1},
+        links_broken=[answer("https://x.test/gone", LinkStatus.BROKEN, "HTTP 404")],
+        links_unknown=[answer("https://x.test/slow", LinkStatus.UNKNOWN, "timed out")],
+    )
+    base.update(over)
+    return SourceRun(**base)
+
+
+def test_the_report_shows_the_link_counts_and_each_problem_link():
+    text = format_report(links_run())
+    assert "links:    checked 4: ok 2, broken 1 (left out), unknown 1 (kept)" in text
+    assert "    broken   https://x.test/gone: HTTP 404" in text
+    assert "    unknown  https://x.test/slow: timed out" in text
+
+
+def test_the_report_has_no_link_lines_for_a_source_that_is_not_links():
+    text = format_report(SourceRun("src-a", docs_fetched=1, summary=summary()))
+    assert "links:" not in text
+    assert "stale:" not in text
+
+
+def test_the_report_with_all_links_ok_lists_no_problem_links():
+    text = format_report(
+        links_run(
+            link_counts={"ok": 4, "broken": 0, "unknown": 0},
+            links_broken=[],
+            links_unknown=[],
+        )
+    )
+    assert "ok 4, broken 0 (left out), unknown 0 (kept)" in text
+    assert "    broken " not in text
+    assert "    unknown " not in text
+
+
+def test_a_link_that_was_redirected_says_where_to():
+    moved = LinkResult(
+        "https://old.test/docs",
+        LinkStatus.UNKNOWN,
+        "redirect not checked: host 'new.test' is not on the allowlist",
+        302,
+        final_url="https://new.test/docs",
+    )
+    text = format_report(links_run(links_broken=[], links_unknown=[moved]))
+    assert (
+        "    unknown  https://old.test/docs: redirect not checked: host 'new.test' "
+        "is not on the allowlist (redirected to https://new.test/docs)"
+    ) in text
+
+
+def test_a_broken_link_that_was_redirected_first_says_where_it_ended():
+    gone = LinkResult(
+        "https://old.test/a", LinkStatus.BROKEN, "HTTP 404", 404, "https://old.test/b"
+    )
+    text = format_report(links_run(links_broken=[gone], links_unknown=[]))
+    assert (
+        "    broken   https://old.test/a: HTTP 404 (redirected to https://old.test/b)"
+        in text
+    )
+
+
+def test_a_link_that_was_not_redirected_has_no_redirect_note():
+    text = format_report(links_run())
+    assert "redirected to" not in text
+
+
+def test_a_long_list_of_broken_links_is_cut_and_says_how_many_more():
+    many = [
+        answer(f"https://x.test/{i}", LinkStatus.BROKEN, "HTTP 404")
+        for i in range(MAX_DETAIL_LINES + 3)
+    ]
+    text = format_report(links_run(links_broken=many, links_unknown=[]))
+    assert text.count("    broken   https://x.test/") == MAX_DETAIL_LINES
+    assert "... and 3 more" in text
+
+
+def test_the_report_says_how_many_stale_chunks_were_removed():
+    text = format_report(links_run(stale_chunks=3))
+    assert "stale:    3 stored chunks of broken links removed" in text
+
+
+def test_a_dry_run_report_says_stale_chunks_would_be_removed():
+    text = format_report(links_run(stale_chunks=3, dry_run=True, summary=None))
+    assert "stale:    3 stored chunks of broken links would be removed" in text
+
+
+def test_no_stale_line_when_nothing_stored_is_affected():
+    assert "stale:" not in format_report(links_run(stale_chunks=0))
+
+
+def test_a_link_note_is_shown_when_the_check_did_not_run():
+    text = format_report(
+        links_run(link_counts=None, link_note="not checked (--no-link-check)")
+    )
+    assert "links:    not checked (--no-link-check)" in text
+
+
+def test_broken_links_do_not_make_a_run_not_ok():
+    assert links_run().ok
+
+
 # ── the command line (main) ──────────────────────────────────
 
 
@@ -570,13 +1062,20 @@ def test_an_unknown_source_exits_with_2(capsys):
 
 def test_the_real_source_names_are_accepted_by_the_parser():
     parser = run_module.build_parser()
-    for name in ("tech-interview-handbook", "roadmap-sh", "all"):
+    for name in ("tech-interview-handbook", *LINK_SOURCES, "all"):
         assert parser.parse_args(["--source", name]).source == name
 
 
 def test_the_defaults_are_a_real_run_with_expiry_and_no_servers_enabled():
     args = run_module.build_parser().parse_args(["--source", "all"])
     assert (args.dry_run, args.expire, args.enable_server) == (False, True, [])
+
+
+def test_the_link_check_is_on_by_default_and_the_flag_turns_it_off():
+    parser = run_module.build_parser()
+    assert parser.parse_args(["--source", "all"]).link_check is True
+    off = parser.parse_args(["--source", "all", "--no-link-check"])
+    assert off.link_check is False
 
 
 def test_an_unknown_server_name_exits_with_2_before_touching_chroma(
@@ -685,3 +1184,16 @@ def test_the_real_handbook_source_asks_for_the_github_flag(
 ):
     assert main(["--source", "tech-interview-handbook"]) == 1
     assert "--enable-server github" in capsys.readouterr().out
+
+
+def test_no_link_check_reaches_a_link_source_through_main(
+    fake_chroma, fake_pipeline, monkeypatch, capsys
+):
+    # With the flag, no request is made, so this test needs no network.
+    adapter = FakeAdapter([link_doc("a")], source_id="links-a")
+    s = spec(adapter, name="links-a", link_only=True)
+    monkeypatch.setattr(run_module, "SOURCES", {"links-a": s})
+    assert main(["--source", "links-a", "--no-link-check"]) == 0
+    out = capsys.readouterr().out
+    assert "links:    not checked (--no-link-check)" in out
+    assert len(fake_pipeline[0].batches[0]) == 1

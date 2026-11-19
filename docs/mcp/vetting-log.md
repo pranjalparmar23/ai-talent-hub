@@ -5,6 +5,7 @@ Verdicts for external MCP servers and content sources, following `docs/mcp/vetti
 - **Date of review:** 2026-11-09. All pages were read on that date; links are under each record.
 - **Status:** these are **proposed** verdicts. Nothing is enabled. Approval means, at most, a disabled entry in `backend/app/mcp/mcp_servers.yaml`.
 - **Update 2026-11-19:** the live web search plan (Phase 7, task 10) was dropped. Brave Search and Tavily are now marked **not adopted**. Their records stay below as research, in case the idea comes back. When retrieval finds nothing, the app answers from the model's own knowledge instead (`docs/architecture/knowledge-layer.md`, Decision 7).
+- **Update 2026-11-19 (Phase 7, task 12):** two link-only lists were added: `official-docs` (front pages of documentation published by the makers of each tool) and `freecodecamp` (courses, the YouTube channel and news topic pages). A link-health check now runs on every link-only ingest. The real runs on 2026-11-19 ended with all 108 links answering (41 roadmap.sh, 44 official docs, 23 freeCodeCamp). The first run had found one moved address and one false "broken", and both were fixed (see the records below).
 - **Tracker:** Phase 6, task 9. Rows refer to the "🔌 Tools & Sources" sheet.
 - **Evidence quality:** *primary* means the project, registry or vendor page itself. *Index* means a third-party aggregator, so confirm at the source before relying on it. *Unverified* means the page could not be read, and nothing was assumed.
 - This is a due-diligence record, not legal advice.
@@ -27,7 +28,9 @@ Verdicts for external MCP servers and content sources, following `docs/mcp/vetti
 | 14 | Tech Interview Handbook | 7 | **approve-ingest** (MIT; LICENSE file read 2026-11-18, and the adapter re-checks it on every run) |
 | 14 | system-design-primer | 7 | **approve-link-only** |
 | 14 | roadmap.sh developer-roadmap | 7 | **approve-link-only** (licence file read 2026-11-18: links only) |
-| 14 | freeCodeCamp | 7 | **approve-link-only** |
+| 14 | freeCodeCamp | 7 | **approve-link-only** (23 links added 2026-11-19: course pages and news topics) |
+| 14 | freeCodeCamp YouTube channel | 7 | **approve-link-only** (channel and playlist pages only; added 2026-11-19) |
+| 14 | Official documentation front pages (curated list) | 7 | **approve-link-only** (44 links; added 2026-11-19) |
 | 15 | O*NET Web Services | 9 | **approve-live-only**, with conditions (permission needed) |
 | 16 | ESCO web service API | 9 | **reject** (for now; no data licence found) |
 | 17 | Third-party O*NET/ESCO wrappers | 9 | **reject** (use the official APIs) |
@@ -40,7 +43,8 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 2. **Brave does not allow retaining results on its search plans.** *Update 2026-11-19: no longer needed, because Brave is not adopted.* If a future source forbids keeping its results, the registry would need a `cache: false` option so the gateway never stores them. That option was built on 2026-11-19 and removed the same day because nothing used it. The gateway cache keeps results in memory, and `cache_ttl_seconds: 0` plus `stale_ttl_seconds: 0` only makes an entry expire at once, since the gateway still writes it and removes it on the next lookup.
 3. **O*NET terms say registration-required apps need the Center's permission** unless a free, public version exists. Talent Hub has logins. Ask for permission, or confirm that a public view covers it, before enabling.
 4. **Production needs HTTP.** The gateway refuses `stdio` in production. Fetch and GitHub are shown above with stdio-style packages. Whether each ships a streamable-HTTP mode was not verified. Plan to run them as self-hosted containers (`internal: true`) or use a hosted endpoint.
-5. **Things this session could not read** (marked *unverified* below): LeetCode terms, Wikimedia reuse terms, GitHub API rate limits, Firecrawl robots.txt behaviour, Context7 request limits, the ESCO data licence, and the LICENSE files of the content repos. The Tech Interview Handbook and roadmap.sh licence files were read on 2026-11-18 (see their records); the others are still unread.
+5. **Things this session could not read** (marked *unverified* below): LeetCode terms, Wikimedia reuse terms, GitHub API rate limits, Firecrawl robots.txt behaviour, Context7 request limits, the ESCO data licence, the LICENSE files of the content repos, and the terms of the freeCodeCamp site, its YouTube channel and its news articles. The Tech Interview Handbook and roadmap.sh licence files were read on 2026-11-18 (see their records); the others are still unread.
+6. **Link health is checked by hand for now.** `python -m app.ingest.run --source <name> --dry-run` asks each site about every link in a link-only list and reports the broken ones without changing anything. It sends `HEAD`, and confirms a 404 or 410 with a one-byte `GET`, because some sites (support.google.com was the first) answer `HEAD` with 404 for a page that exists. Without `--dry-run` it drops the broken links and removes their stored copies. Only 404 and 410 count as broken. A timeout, a block (403, 429) or a redirect to another site counts as unknown and the link is kept, so a site that blocks bots can hide a dead link. The check cannot see a page that still answers 200 but no longer says what our description says. Running it on a schedule is a later CI task.
 
 ---
 
@@ -222,7 +226,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Risks found: age of content; promotional links; coverage gap.
 - Verdict: approve-ingest
 - Conditions: read the LICENSE file at ingest time; store source name, URL, licence and access date with every chunk; include the MIT notice in an attribution file; skip promotional content; run the link-health check.
-- Status (2026-11-18): met in code except the link-health check. The LICENSE is checked on every run, the credit line is stored with every chunk, promotional content is removed (on the checked copy: 45 promotional items across 12 pages, plus 3 pages skipped outright and a template file), and the notice is in `docs/attribution.md`. The link-health check is Phase 7, task 12.
+- Status (2026-11-18, updated 2026-11-19): met in code. The LICENSE is checked on every run, the credit line is stored with every chunk, promotional content is removed (on the checked copy: 45 promotional items across 12 pages, plus 3 pages skipped outright and a template file), and the notice is in `docs/attribution.md`. The link-health check (Phase 7, task 12) runs on link-only lists, not on the Handbook. Its pages are read from the repository on every run, so a page removed upstream stops being refreshed, and the expiry sweep removes it once its 90 days are up. Outbound links inside the Handbook's page text are not checked (open).
 - Re-review by: 2027-02-09
 
 ### system-design-primer (`donnemartin/system-design-primer`) — 2026-11-09
@@ -253,7 +257,7 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Risks found: restrictive custom licence. Our own descriptions must not copy or closely follow the roadmaps' text.
 - Verdict: approve-link-only
 - Conditions: link and short own-words summary only; never fetch or store the roadmaps' content. Licence file read (see Rights).
-- Status (2026-11-18): done. 41 links with descriptions written by us are in `backend/app/ingest/sources/data/roadmap_sh.yaml` (Phase 7, task 6). The addresses match the repository's roadmap folders; the live pages are checked by the link-health task.
+- Status (2026-11-18): done. 41 links with descriptions written by us are in `backend/app/ingest/sources/data/roadmap_sh.yaml` (Phase 7, task 6). The addresses match the repository's roadmap folders. The live pages were checked with the link-health check on 2026-11-19, and all 41 answered.
 - Re-review by: 2027-02-09
 
 ### freeCodeCamp — 2026-11-09
@@ -269,6 +273,38 @@ Not covered here: rows 1–3 and 5 (decided or not MCP) and rows 18–25 (later 
 - Risks found: share-alike on adapted content; unofficial licence source.
 - Verdict: approve-link-only
 - Conditions: links and our own summaries only until the repo's licence files are read and the share-alike effect on our corpus is decided.
+- Status (2026-11-19): done for the links in `backend/app/ingest/sources/data/freecodecamp.yaml` (Phase 7, task 12). There are 23 links, each with one sentence we wrote: 11 course pages under `/learn`, 2 video links (see the next record) and 10 topic pages of the news site. Nothing is fetched or stored from them. Single articles are not listed on purpose, because they move and the check cannot tell that one has changed. The course addresses are the most likely to change, because freeCodeCamp renames its certifications. A link-health check on 2026-11-19 found all 23 answering. Still unread: freeCodeCamp's own terms and the licence of its news articles. That has no effect while we only link.
+- Re-review by: 2027-02-09
+
+### freeCodeCamp YouTube channel (links only) — 2026-11-19
+- Type: data source (links to a public channel)
+- Offers: long free video courses on programming and computer science.
+- Links (accessed 2026-11-19): `https://www.youtube.com/@freecodecamp` and `https://www.youtube.com/@freecodecamp/playlists`, both in `freecodecamp.yaml`. The link check got an answer from both on 2026-11-19. YouTube's own terms were **not read** for this review (unverified).
+- Rights: the videos belong to the channel and its authors. We link only: no download, no transcript, no embed, no thumbnail. This follows the YouTube transcript record above (reject the server; link-only for video).
+- Maintenance: not checked.
+- Tools: n/a
+- Data sent / auth: the link check sends only the page address. No key.
+- Limits and cost: free.
+- Quality and coverage: broad, mostly technical. The quality of single videos was not reviewed.
+- Risks found: single video addresses are not listed, because they could not be confirmed from here and videos get replaced. YouTube may answer a bot with a consent page, a 403 or a 429. The check treats those as unknown and keeps the link, so a removed channel page could go unnoticed.
+- Verdict: approve-link-only
+- Conditions: channel and playlist pages only. A single video is added only after someone has watched it and written the one-sentence summary. No transcripts. Do not use the YouTube Data API for this without reading its policies first (see the transcript record for the 30-day limit on stored API data).
+- Re-review by: 2027-05-09
+
+### Official documentation front pages (curated list `official-docs`) — 2026-11-19
+- Type: data source (our own curated list of links)
+- Offers: the front pages of documentation and guides published by the makers of a tool, language or platform, for the skills that appear in learning plans.
+- Links (accessed 2026-11-19): the 44 addresses are in `backend/app/ingest/sources/data/official_docs.yaml`. The link check requested each one live on 2026-11-19. That shows the page answers and nothing more.
+- Rights: every page belongs to its publisher, and the publisher's own licence applies. Some documentation sites are openly licensed and some are not; they were not reviewed one by one, because nothing is copied. We store a link, a title and one sentence we wrote ourselves, the same as roadmap.sh, recorded as `proprietary` (link only).
+- Maintenance: the list is ours, and publishers move pages. The first real run on 2026-11-19 found two cases. `docs.claude.com` now redirects to `platform.claude.com`, so the address was updated. `support.google.com` answered `HEAD` with 404 although the page loads, so the checker now confirms a 404 with a `GET` before dropping a link.
+- Tools: n/a
+- Data sent / auth: the link check sends only the page address to that page's own site, with a User-Agent that names the project. No cookies and no user data.
+- Limits and cost: free. At most 5 requests at a time, one at a time per host with a 0.25 s pause.
+- Quality and coverage: strong for software and data skills. Thin for non-technical roles: 4 of the 44 links are for non-technical roles and 2 for all roles. The list includes cloud vendors and Anthropic's own prompt guide, so it is not vendor-neutral. A plan treats each as the official source for that tool and nothing more.
+- Risks found: pages move or change, and the check only catches 404 and 410. Official pages are not always beginner-friendly. A site that blocks bots can hide a dead link (see follow-up 6).
+- Verdict: approve-link-only
+- Conditions: the top page of a guide, never a deep page. Addresses written in tidy form. One sentence of our own for each. Run the link check before each ingest and after any change to the list. A new list needs a `SOURCE_TRUST` entry in the roadmap agent (a test checks it).
+- Status (2026-11-19): done, 44 links. Second real run: 44 of 44 answered, after the two fixes above.
 - Re-review by: 2027-02-09
 
 ### O*NET Web Services (US Dept. of Labor) — 2026-11-09

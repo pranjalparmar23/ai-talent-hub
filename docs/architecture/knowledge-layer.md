@@ -2,8 +2,8 @@
 
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, what happens when it finds nothing, and how the interview and learning-plan agents use all of that.
 
-**Tracker:** Phase 7, tasks 2 to 11. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8).
+**Tracker:** Phase 7, tasks 2 to 12. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering). A real ingest of them is still to do.
 
 ---
 
@@ -16,11 +16,12 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 3 | Embedding model | **Keep `all-MiniLM-L6-v2` (English only).** Decided 2026-11-10 |
 | 4 | Old data | Not migrated. It stays in the local snapshot and is deleted in task 15 after the new evaluation passes |
 | 5 | Licence policy | Allowlist of permissive licences for full text. Share-alike, unknown and restrictive licences are refused. Restrictive sources are link-only |
-| 6 | Where content comes from | One adapter per source. Pilot: Tech Interview Handbook (full text) and roadmap.sh (link only) |
-| 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). After each run, chunks of that source that are past `expires_at` are removed |
+| 6 | Where content comes from | One adapter per source. Tech Interview Handbook (full text), and three link-only lists: roadmap.sh, official documentation and freeCodeCamp (task 12) |
+| 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). Link-only lists are checked for dead pages first. After each run, chunks of that source that are past `expires_at` are removed |
 | 8 | How content is found | `RAGRetriever.search()`: filters in ChromaDB, skips expired chunks, drops weak matches, avoids near-duplicates, returns citations. Details in Decision 6 below |
 | 9 | What happens when nothing is found | `retrieve_with_fallback()`: the answer comes from the model's own knowledge, is labelled as such, and shows no sources. No web search and no outside service. Details in Decision 7 below. Decided 2026-11-19 |
 | 10 | How the agents use it | Both agents call `retrieve_with_fallback()` in a worker thread, put the text into the prompt as untrusted data, and return `sources` and `notice`. A link in a learning plan must come from a retrieved page. Details in Decision 8 below |
+| 11 | How learning links are kept healthy and ranked | Link lists are checked for dead pages on every ingest (404 and 410 are dropped, anything unclear is kept). The roadmap agent ranks resources by similarity, nudged by source trust and freshness. Details in Decision 9 below |
 
 ---
 
@@ -176,12 +177,14 @@ Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, w
 |---|---|---|---|---|---|
 | Tech Interview Handbook | `tech_interview_handbook.py` | full text | MIT, checked on every run | GitHub MCP server, through the gateway | 45 pages on the copy checked (2026-08-07), 4 files skipped |
 | roadmap.sh | `link_only.py` with `data/roadmap_sh.yaml` | link only | `proprietary` (links only) | Our own YAML list. No network, no MCP | 41 links with descriptions written by us |
+| Official documentation | `link_only.py` with `data/official_docs.yaml` | link only | `proprietary` (links only) | Our own YAML list | 44 links with descriptions written by us (task 12) |
+| freeCodeCamp | `link_only.py` with `data/freecodecamp.yaml` | link only | `proprietary` (links only) | Our own YAML list | 23 links: courses, YouTube channel and playlists, news topics (task 12) |
 
 **Reading files.** Adapters read through a small `SourceReader` interface. In production that is `GatewayGitHubReader` (`readers.py`), which goes through the MCP gateway and refuses a failed call, old cached data, a result cut at `max_result_chars`, and an empty reply. In tests it is an in-memory reader, so the adapters run with no network.
 
 **Handbook cleaning.** Before storing, the adapter removes page headers, imports, components, HTML and images; links keep their text but lose the address; paragraphs, list items and table rows with affiliate links or sales wording are removed. Code blocks and inline code are never changed. A page that has under 200 characters left is skipped. It skips `resume-old.md`, `best-coding-interview-courses.md`, `mock-interviews.md` and template files, and records the reason for each. Each page is classified into a `content_type`, `role_family` and `level` from its file name, so behavioural pages go to `interview_knowledge` and the study plan goes to `learning_knowledge`.
 
-**Link-only lists.** Each entry needs a URL, title, domain, role family and a one-sentence summary. A bad or repeated entry is skipped with a reason and the rest still load. The text stored is the title and the summary.
+**Link-only lists.** Each entry needs a URL, title, domain, role family and a one-sentence summary. A bad or repeated entry is skipped with a reason and the rest still load. The text stored is the title and the summary. Every address is tidied first (`normalise_url()`: `https`, lower-case host, no fragment, no tracking parameters, no trailing slash), so one page has one address and one document id. A page already listed, in the same file or by an earlier list in the same run, is skipped with the reason.
 
 **Credit.** Each source's credit line and licence notice are recorded in `docs/attribution.md`.
 
@@ -190,7 +193,7 @@ Code: `app/ingest/sources/`. An adapter knows one source: where its pages are, w
 1. Vet it and record the verdict in `docs/mcp/vetting-log.md`.
 2. Read its licence file itself.
 3. Full text: add an adapter in `app/ingest/sources/` that returns a `SourceBatch`. Link only: add a YAML list and use `LinkOnlyAdapter`.
-4. Register it in `SOURCES` in `app/ingest/run.py`. List any MCP server it needs in `servers`.
+4. Register it in `SOURCES` in `app/ingest/run.py`. List any MCP server it needs in `servers`. A link-only list is registered with `link_only=True`, so the link check runs on it, and it needs an entry in `SOURCE_TRUST` (Decision 9). A test fails if either is missing.
 5. Add it to `docs/attribution.md`.
 6. Add tests. Run `python -m app.ingest.run --source <name> --dry-run`, then a real run, and check the stored credit line.
 
@@ -203,6 +206,8 @@ Code: `app/ingest/run.py` (the command) and `app/ingest/expiry.py` (finding and 
 ```
 python -m app.ingest.run --source tech-interview-handbook --enable-server github
 python -m app.ingest.run --source roadmap-sh
+python -m app.ingest.run --source official-docs
+python -m app.ingest.run --source freecodecamp
 python -m app.ingest.run --source all --dry-run
 ```
 
@@ -213,9 +218,10 @@ Run it from `backend/`. ChromaDB must be running (`CHROMA_HOST` and `CHROMA_PORT
 For each chosen source, in order:
 
 1. Ask the source adapter for its documents.
-2. Give them to the pipeline. (A dry run only checks the licence gate.)
-3. Remove that source's chunks that are past their expiry date.
-4. Print a report: fetched, added, updated, unchanged, refused, skipped, failed and expired, with the reason for anything refused, skipped or failed.
+2. Link-only sources only: check each link (Decision 9). A page the site says is gone is left out, and any copy stored earlier is removed.
+3. Give the documents to the pipeline. (A dry run only checks the licence gate.)
+4. Remove that source's chunks that are past their expiry date.
+5. Print a report: fetched, added, updated, unchanged, refused, skipped, failed and expired, with the reason for anything refused, skipped or failed.
 
 A source that cannot be read is reported as `PROBLEM`. The other sources still run.
 
@@ -223,12 +229,13 @@ A source that cannot be read is reported as `PROBLEM`. The other sources still r
 
 | Option | Effect |
 |---|---|
-| `--source NAME` or `--source all` | Required. `NAME` is `tech-interview-handbook` or `roadmap-sh` |
-| `--dry-run` | Fetch and check licences, and list expired chunks. Writes and deletes nothing, and creates no collections |
+| `--source NAME` or `--source all` | Required. `NAME` is `tech-interview-handbook`, `roadmap-sh`, `official-docs` or `freecodecamp` |
+| `--dry-run` | Fetch, check links and licences, and list expired chunks. Writes and deletes nothing, and creates no collections. It still sends the link-check requests, which only read |
 | `--no-expire` | Do not remove expired chunks |
+| `--no-link-check` | Do not ask the sites whether link-only pages still exist |
 | `--enable-server NAME` | Switch an MCP server on for this run only |
 
-Exit code: `0` when nothing failed, `1` when a document or a whole source failed (a refused document is not a failure), `2` for a bad argument or an unknown server name.
+Exit code: `0` when nothing failed, `1` when a document or a whole source failed (a refused document is not a failure, and neither is a broken link), `2` for a bad argument or an unknown server name. `--source all` includes the handbook, so it exits `1` while the `github` server is off or has no token.
 
 ### Expiry
 
@@ -424,7 +431,7 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 | | Roadmap agent | Interview agent |
 |---|---|---|
 | Collection | `learning_knowledge` | `interview_knowledge` |
-| Search | One per skill gap: "learning resources for {skill}", top 3 each. Merged, deduplicated by chunk, best match first, at most 12 | One: "{company} {role} interview questions", top 5 |
+| Search | One per skill gap: "learning resources for {skill}", top 3 each. Merged, deduplicated by chunk, ranked by similarity with a nudge for source trust and freshness (Decision 9), at most 12, and at most 12 skills searched | One: "{company} {role} interview questions", top 5 |
 | Prompt size | 500 characters per chunk | 3000 characters in all, at most 700 per chunk. A chunk is included whole up to its cap or left out |
 | Filters | None | None |
 | `sources` returned | The reviewed pages the plan actually links to | The reviewed pages that went into the prompt |
@@ -452,6 +459,72 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 
 ---
 
+## Decision 9: learning links, link health and ranking (task 12)
+
+Code: `app/ingest/linkcheck.py`, `app/ingest/sources/link_only.py`, `app/ingest/run.py`, the lists in `app/ingest/sources/data/`, and `RoadmapAgent` in `app/agents/candidate/roadmap_agent.py`.
+
+A learning plan is only as good as its links. This task makes three changes: more good links, a check that they still work, and a better order for the ones the plan sees.
+
+### The lists
+
+| List | Links | What it holds |
+|---|---|---|
+| `roadmap_sh.yaml` | 41 | Role roadmaps (task 6) |
+| `official_docs.yaml` | 44 | Front pages of documentation published by the makers of each tool, language or platform. 38 for technical roles, 4 for non-technical roles, 2 for all roles |
+| `freecodecamp.yaml` | 23 | 11 course pages, 2 YouTube links (channel and playlists), 10 news topic pages |
+
+All three are link-only: a link, a title and one sentence we wrote. No MCP fetch is used for content, because nothing is copied. Each list has its own `source_id` and its own record in `docs/mcp/vetting-log.md`. Only top pages are listed, never single articles or videos, because deep pages move and a page's links cannot be confirmed from outside. If someone has watched a video and written the sentence, it can be added.
+
+### The link check
+
+`check_links()` in `app/ingest/linkcheck.py` asks each site whether a page is still there. It uses its own small `httpx` client, not the MCP Fetch server, because it needs only a status code. It reuses the gateway's URL guard (`validate_url`): `https` or `http` only, no credentials, the host must be one of the hosts in the list, and every address it resolves to must be public.
+
+- It sends `HEAD`. When `HEAD` is refused or says the page is gone (400, 403, 404, 405, 410, 501), it sends a one-byte `GET`, and the `GET` answer counts. This matters: the first real run showed `support.google.com` answering `HEAD` with 404 for a page that exists.
+- It follows up to 3 redirects by hand, running each hop through the guard. A redirect to another host is not followed, and the report says where it led, so the list can be updated.
+- It sends 5 requests at a time, one at a time per host with a 0.25 s pause, with a 10 s timeout and a User-Agent that names the project. No cookies and no user data go out.
+
+| Result | When | What ingest does |
+|---|---|---|
+| `ok` | The final answer is 2xx | Keeps the link |
+| `broken` | `HEAD` and `GET` both say 404 or 410 | Leaves the link out, and removes any copy stored earlier |
+| `unknown` | Anything else: timeout, 403, 429, 5xx, a redirect to another site, no network, a blocked address | Keeps the link |
+
+A link is dropped only when the site clearly says the page is gone. A bot block or a bad network day never deletes good links. Removing the stored copy matters: a page that was fine on an earlier run and is dead now would otherwise keep appearing in plans until its 90 days ran out. A dry run reports what would be removed and changes nothing. If the check as a whole crashes, nothing is dropped. A broken link is reported but does not change the exit code.
+
+The check runs for link-only sources, not for the handbook. The handbook is read from its repository on every run, so a page removed upstream stops being refreshed and expires. Links inside the handbook's text are not checked.
+
+### First real run (2026-11-19)
+
+All 108 links answered in the end. The first run found two problems, both fixed:
+
+1. `support.google.com/analytics` looked broken, because the server answers `HEAD` with 404. The checker now confirms a 404 or 410 with a `GET`.
+2. `docs.claude.com` redirects to `platform.claude.com`. The checker rightly did not follow a redirect to another host and kept the link as `unknown`. The address in the list was updated, and the report now says where a link was redirected to.
+
+### Ranking
+
+Before the cap of 12, the roadmap agent ranks every retrieved chunk:
+
+```
+rank = similarity x (0.6 + 0.3 x trust + 0.1 x freshness)
+```
+
+- **Trust** comes from `SOURCE_TRUST`: official-docs 1.0, roadmap-sh 0.8, freecodecamp 0.8, tech-interview-handbook 0.7, any other source 0.5.
+- **Freshness** is 1 for a page confirmed just now and falls evenly to 0 at 90 days, the same as the expiry. It is read from `fetched_at_ts`, which every ingest run refreshes, so it says when the page was last confirmed. A missing or odd date is neutral (0.5).
+- Similarity stays the main term, so trust and freshness only separate near ties. An official page beats a list match that is about 0.04 better, never a clearly better one. Nothing changes in the stored data.
+- **Coverage.** Every skill gap with a match keeps its best chunk before any skill gets a second one. Up to 12 skills are searched (the old loop stopped after 12 chunks, so later skills were never searched). The prompt still shows the real similarity.
+
+The weights and trust values are starting values. Task 13 tunes them against the golden set.
+
+### What it does not do
+
+- It does not detect a "soft 404" (a normal page that says "not found"), or a page that answers 200 but no longer says what our sentence says.
+- A site that blocks bots can hide a dead link, because blocked answers are kept.
+- The check is run by hand for now. Running it on a schedule is a later CI task.
+- Non-technical roles are thin: official documentation covers them poorly (4 of the 44 links are for non-technical roles and 2 for all roles). Phase 9 needs more sources for them.
+- The trust values are a judgement. The list includes cloud vendors and Anthropic's own prompt guide, so it is not vendor-neutral.
+
+---
+
 ## What the rest of Phase 7 builds on this
 
 | Task | Uses |
@@ -462,7 +535,7 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 | 9 | **Built.** Retriever v2 (`RAGRetriever.search()`) filters on the fields above, skips expired chunks, and returns `title`, `url`, `licence` and `attribution` as citations |
 | 10 | **Built.** `retrieve_with_fallback()` (Decision 7). The original live web lookup was dropped on 2026-11-19 |
 | 11 | **Built.** The interview and roadmap agents call `retrieve_with_fallback()` and return `sources` built from the citations, plus `notice` (Decision 8). The prompt note goes into the prompt on the general route. A learning plan can only link to retrieved pages |
-| 12 | Learning-plan links get a health check, and the links are shown with their credit |
+| 12 | **Built.** Three link-only lists (108 links), a link-health check on every link ingest, and ranking by trust and freshness (Decision 9). The credit is shown by task 16 |
 | 13, 14 | The evaluation set and tests cover the filters, idempotency, the licence gate and the fallback (including that a general-knowledge answer carries no invented sources) |
 
 ---
@@ -472,6 +545,8 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 - `RetrieverAgent` (`agents/shared/retriever_agent.py`) was used nowhere and could not have worked: it `await`ed a function that is not async and passed `collection=` where the retriever expects `collection_name=`. Removed in task 9.
 - The real ingest runs on 2026-11-19 worked with ChromaDB's `upsert`, `get` with `where`, and `update` calls, and ChromaDB accepted the expiry filter (`$lte` on `expires_at_ts`, inside `$and` for one source). That filter matched nothing so far, and `delete` has not run for real. The retriever's filters (`$in`, `$gt`, `$and`) and the `embeddings` option were checked against an in-memory ChromaDB 0.5.23 (the version this project pins), which also ran the expiry sweep end to end. They have not yet run against the ChromaDB container with the real embedding model. The unit tests use a fake store. Task 14 proves all of this against the real client.
 - The old roadmap agent called the synchronous `retrieve()` straight from an async method, which blocked the event loop for the length of every search. Fixed in task 11 (Decision 8).
+- The roadmap agent stopped searching once it had 12 chunks, so with five or more skill gaps the later skills got no search. Fixed in task 12 (Decision 9).
+- The first link check treated a `HEAD` 404 as proof that a page was gone. The first real run showed a site that answers `HEAD` with 404 for a page that loads. Fixed in task 12.
 
 ## Open items
 
@@ -486,7 +561,13 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 - **The interview prompt still says "Reference material from real interviews".** The knowledge base holds preparation guides, not real interviews, so the wording is a little off. Fix it when the prompt is next touched.
 - **The frontend still reads the old resource `source` key.** `AnalysisView.tsx` uses it only as a tooltip. Task 16 updates it and shows `sources` and `notice`.
 - **The context budgets are starting values.** 12 resources and 500 characters per chunk for the roadmap; 3000 characters and 700 per chunk for the interview. Task 13 can tune them.
-- **The agents have not run against the real ChromaDB.** Their unit tests use a stand-in retriever. Task 14 runs them against the real client with the 60 learning chunks and 829 interview chunks.
+- **The agents have not run against the real ChromaDB.** Their unit tests use a stand-in retriever. Task 14 runs them against the real client with the learning chunks (60 before the new lists are ingested) and the 829 interview chunks.
+- **The two new lists are not ingested yet.** They passed a real link check, but the real ingest (`--source official-docs`, then `--source freecodecamp`) is still to run.
+- **The link check is manual.** Run `python -m app.ingest.run --source <name> --dry-run` after any list change. A scheduled run belongs with CI.
+- **The `github` token is not set on the development machine.** The handbook cannot be re-ingested until `GITHUB_PERSONAL_ACCESS_TOKEN` is in `backend/.env`. It is to be set before the last task of Phase 7. Until then, run the link sources one at a time, not with `--source all`.
+- **Links inside the handbook's text are not checked.** Only the link-only lists get the check.
+- **freeCodeCamp's terms, its YouTube channel's terms and the licence of its news articles are unread.** This has no effect while we only link (vetting log).
+- **Ranking weights and trust values are starting values.** Task 13 tunes them. Non-technical roles are thin in the official-documentation list until Phase 9.
 
 ## Changelog
 
@@ -499,3 +580,4 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 | 2026-11-19 | Added Decision 6: retrieval (task 9). Marked task 9 built, removed the `RetrieverAgent` finding, and added two open items |
 | 2026-11-19 | Added Decision 7: the fallback when nothing is found (task 10). The live web lookup was dropped, so no search provider is used. Fixed the wording on result order in Decision 6 and updated the open items |
 | 2026-11-19 | Added Decision 8: how the agents use the knowledge layer (task 11). The interview and roadmap agents now read the new collections through `retrieve_with_fallback()` and return `sources` and `notice`. Marked task 11 built, updated the status and the task table, and added five open items and one finding |
+| 2026-11-19 | Added Decision 9: learning links, link health and ranking (task 12). Two link lists added, the link check built and run for real (108 of 108 links answering), and resources ranked by trust and freshness. Updated the status, the adapter table, the ingest options and the open items |
