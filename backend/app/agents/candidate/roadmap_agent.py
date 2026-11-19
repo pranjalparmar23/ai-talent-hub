@@ -2,32 +2,51 @@
 
 This is the first agent that combines LLM + RAG. Flow:
   1. Take skill gaps and target role from CandidateGraph
-  2. Query ChromaDB's learning_resources collection for relevant chunks
+  2. Query ChromaDB's learning_knowledge collection for relevant chunks, through
+     retrieve_with_fallback() (Phase 7)
   3. Pass gaps + role + retrieved resources to Groq
-  4. Return a structured weekly plan grounded in the retrieved resources
+  4. Return a structured weekly plan grounded in the retrieved resources, with the
+     reviewed sources it links to
+
+Design notes:
+  - Links in the plan can only come from retrieved chunks. A link the model made up is
+    dropped, and a link that was retrieved always gets its real title.
+  - When nothing reviewed matched, the plan is built from general knowledge: generic
+    resource wording, no links, and a `notice` that says so.
+  - Retrieval is synchronous (embedding + Chroma HTTP), so it runs in a worker thread.
 """
 
+import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.ingest.schema import LEARNING_COLLECTION
 from app.llm.models import get_llm
 from app.llm.prompts.roadmap_prompts import ROADMAP_PROMPT
+from app.mcp import security
+from app.rag.fallback import (
+    GENERAL_KNOWLEDGE_PROMPT_NOTE,
+    GENERAL_KNOWLEDGE_USER_NOTE,
+    retrieve_with_fallback,
+)
 from app.rag.retriever import RAGRetriever
 from app.utils.json_parser import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
 
-COLLECTION = "learning_resources"
+COLLECTION = LEARNING_COLLECTION
 
 # How many resources to retrieve per skill gap.
 # Balance: too few → LLM can't ground, too many → prompt bloat + retrieval noise.
 RESOURCES_PER_SKILL = 3
 MAX_TOTAL_RESOURCES = 12
-SIMILARITY_THRESHOLD = 0.30  # below this = weak match, dropped as noise
+MAX_CONTENT_CHARS = 500  # cap chunk size for prompt budget
+# Weak matches are dropped by search() itself (its default similarity cutoff, 0.30).
 
 
 _ROADMAP_FALLBACK: dict[str, Any] = {
@@ -39,6 +58,29 @@ _ROADMAP_FALLBACK: dict[str, Any] = {
 }
 
 
+@dataclass(frozen=True)
+class _Context:
+    """What retrieval found for all skill gaps together."""
+
+    resources: list[dict]  # for the prompt, best match first
+    sources: list[dict]  # one citation per page, in the same order
+
+    @property
+    def grounded(self) -> bool:
+        return bool(self.resources)
+
+    def prompt_text(self) -> str:
+        """The `resources` input of the prompt. Outside text, so it is marked as data."""
+        if not self.resources:
+            return GENERAL_KNOWLEDGE_PROMPT_NOTE
+        return security.wrap_untrusted(
+            COLLECTION, json.dumps(self.resources, ensure_ascii=False)
+        )
+
+    def titles_by_url(self) -> dict[str, str]:
+        return {c["url"]: c["title"] for c in self.sources if c.get("url")}
+
+
 class RoadmapAgent:
     """Turns skill gaps + RAG context into a weekly learning plan.
 
@@ -46,6 +88,8 @@ class RoadmapAgent:
         agent = RoadmapAgent()
         plan = await agent.generate(missing_skills, target_role)
         # plan["weeks"], plan["total_weeks"], plan["summary"]
+        # plan["sources"]: reviewed sources the plan links to
+        # plan["notice"]: set when the plan rests on no reviewed source
     """
 
     def __init__(self):
@@ -83,10 +127,14 @@ class RoadmapAgent:
                 "summary": "No skill gaps identified — resume already matches the JD requirements.",
             }
 
-        # Retrieve resources per skill, dedupe, filter by similarity
-        resources = self._retrieve_resources(skill_gaps)
+        # Retrieve resources per skill and dedupe (weak matches are dropped by search()).
+        # Blocking work (embedding + Chroma HTTP), so it runs off the event loop.
+        context = await asyncio.to_thread(self._retrieve_resources, skill_gaps)
         logger.info(
-            f"RoadmapAgent retrieved {len(resources)} resources for {len(skill_gaps)} gaps"
+            "RoadmapAgent retrieved %d resources for %d gaps (grounded=%s)",
+            len(context.resources),
+            len(skill_gaps),
+            context.grounded,
         )
 
         try:
@@ -94,7 +142,7 @@ class RoadmapAgent:
                 {
                     "skill_gaps": json.dumps(skill_gaps, ensure_ascii=False),
                     "target_role": target_role,
-                    "resources": json.dumps(resources, ensure_ascii=False),
+                    "resources": context.prompt_text(),
                 }
             )
         except Exception as e:
@@ -108,51 +156,81 @@ class RoadmapAgent:
         parsed = parse_llm_json(
             response.content, fallback={**_ROADMAP_FALLBACK, "target_role": target_role}
         )
-        return self._normalize(parsed, target_role=target_role)
+        plan = self._normalize(
+            parsed, target_role=target_role, titles_by_url=context.titles_by_url()
+        )
+        self._add_sources(plan, context)
+        return plan
 
     # ── RAG retrieval ────────────────────────────────────────────────────
 
-    def _retrieve_resources(self, skill_gaps: list[str]) -> list[dict]:
-        """Query ChromaDB once per skill, merge results, dedupe by content."""
-        all_chunks: list[dict] = []
+    def _retrieve_resources(self, skill_gaps: list[str]) -> _Context:
+        """Query ChromaDB once per skill, merge results, dedupe by chunk."""
+        found: list[tuple[dict, dict]] = []  # (prompt resource, citation)
         seen_ids: set[str] = set()
 
         for skill in skill_gaps:
             query = f"learning resources for {skill}"
             try:
-                results = self.retriever.retrieve(
-                    collection_name=COLLECTION,
-                    query=query,
+                retrieval = retrieve_with_fallback(
+                    query,
+                    COLLECTION,
+                    retriever=self.retriever,
                     top_k=RESOURCES_PER_SKILL,
                 )
             except Exception as e:
-                # ChromaDB down or transient error — don't fail the whole roadmap
-                logger.warning(f"RAG retrieval failed for skill '{skill}': {e}")
+                # Nothing here may fail the whole roadmap
+                logger.warning(f"RAG retrieval failed for a skill: {e}")
                 continue
 
-            for doc in results:
-                if doc.id in seen_ids:
+            for chunk in retrieval.chunks:
+                if chunk.id in seen_ids:
                     continue
-                if doc.similarity < SIMILARITY_THRESHOLD:
-                    continue
-                seen_ids.add(doc.id)
-                all_chunks.append(
-                    {
-                        "content": doc.document[
-                            :500
-                        ],  # cap chunk size for prompt budget
-                        "metadata": doc.metadata,
-                        "similarity": round(doc.similarity, 3),
-                        "matched_skill": skill,
-                    }
+                seen_ids.add(chunk.id)
+                citation = chunk.citation
+                found.append(
+                    (
+                        {
+                            "title": citation["title"],
+                            "url": citation["url"],
+                            "content": chunk.text[:MAX_CONTENT_CHARS],
+                            "matched_skill": skill,
+                            "similarity": round(chunk.similarity, 3),
+                        },
+                        citation,
+                    )
                 )
 
-            if len(all_chunks) >= MAX_TOTAL_RESOURCES:
+            if len(found) >= MAX_TOTAL_RESOURCES:
                 break
 
         # Sort by similarity descending — best matches first for LLM attention
-        all_chunks.sort(key=lambda d: d["similarity"], reverse=True)
-        return all_chunks[:MAX_TOTAL_RESOURCES]
+        found.sort(key=lambda pair: pair[0]["similarity"], reverse=True)
+        found = found[:MAX_TOTAL_RESOURCES]
+
+        sources: list[dict] = []
+        listed: set[str] = set()
+        for _, citation in found:
+            key = citation["url"] or citation["title"]
+            if key not in listed:
+                listed.add(key)
+                sources.append(citation)
+        return _Context(resources=[r for r, _ in found], sources=sources)
+
+    @staticmethod
+    def _add_sources(plan: dict[str, Any], context: _Context) -> None:
+        """Add `sources` (reviewed pages the plan links to) and `notice` to the plan."""
+        used = {
+            r["url"]
+            for week in plan.get("weeks", [])
+            for r in week.get("resources", [])
+            if r.get("url")
+        }
+        plan["sources"] = [c for c in context.sources if c.get("url") in used]
+        if plan.get("weeks") and not plan["sources"]:
+            plan["notice"] = GENERAL_KNOWLEDGE_USER_NOTE
+        else:
+            plan["notice"] = None
 
     # ── Normalization ───────────────────────────────────────────────────
 
@@ -163,8 +241,19 @@ class RoadmapAgent:
             return []
         return [s.strip() for s in value if isinstance(s, str) and s.strip()]
 
-    def _normalize(self, parsed: dict, *, target_role: str) -> dict[str, Any]:
-        """Enforce shape invariants on LLM output."""
+    def _normalize(
+        self,
+        parsed: dict,
+        *,
+        target_role: str,
+        titles_by_url: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Enforce shape invariants on LLM output.
+
+        `titles_by_url` is every link that was retrieved, with its real title. A
+        resource may only carry one of those links.
+        """
+        titles_by_url = titles_by_url or {}
         weeks = parsed.get("weeks")
         if not isinstance(weeks, list):
             weeks = []
@@ -186,7 +275,9 @@ class RoadmapAgent:
                         for t in (w.get("tasks") or [])
                         if isinstance(t, str) and t.strip()
                     ],
-                    "resources": self._clean_week_resources(w.get("resources")),
+                    "resources": self._clean_week_resources(
+                        w.get("resources"), titles_by_url
+                    ),
                     "estimated_hours": self._coerce_hours(w.get("estimated_hours")),
                 }
             )
@@ -210,18 +301,31 @@ class RoadmapAgent:
         return result
 
     @staticmethod
-    def _clean_week_resources(value) -> list[dict]:
+    def _clean_week_resources(value, titles_by_url: dict[str, str]) -> list[dict]:
+        """Keep `{title, url, type}` entries.
+
+        - A link that was retrieved gets its real title. This stops a wrong title
+          from sitting on a real link.
+        - A link that was NOT retrieved is made up, so its entry is dropped.
+        - An entry with no link is a generic one ("official documentation").
+        """
         if not isinstance(value, list):
             return []
         cleaned = []
         for r in value:
             if not isinstance(r, dict):
                 continue
+            url = str(r.get("url", "") or "").strip()
+            if url:
+                title = titles_by_url.get(url)
+                if title is None:
+                    continue
+            else:
+                title = str(r.get("title", "") or "").strip() or "Untitled resource"
             cleaned.append(
                 {
-                    "title": str(r.get("title", "") or "").strip()
-                    or "Untitled resource",
-                    "source": str(r.get("source", "") or "").strip() or None,
+                    "title": title,
+                    "url": url,
                     "type": str(r.get("type", "") or "").strip().lower() or "resource",
                 }
             )
