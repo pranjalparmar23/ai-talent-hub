@@ -1,9 +1,9 @@
 # Knowledge Layer Design
 
-How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, and how the pipeline, the licence gate and the source adapters fill the collections.
+How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, and what happens when it finds nothing.
 
-**Tracker:** Phase 7, tasks 2 to 9. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The unit tests still use fakes. The retriever can search them (task 9, Decision 6), but no agent uses it yet (task 11).
+**Tracker:** Phase 7, tasks 2 to 10. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). No agent uses either yet (task 11).
 
 ---
 
@@ -19,6 +19,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 6 | Where content comes from | One adapter per source. Pilot: Tech Interview Handbook (full text) and roadmap.sh (link only) |
 | 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). After each run, chunks of that source that are past `expires_at` are removed |
 | 8 | How content is found | `RAGRetriever.search()`: filters in ChromaDB, skips expired chunks, drops weak matches, avoids near-duplicates, returns citations. Details in Decision 6 below |
+| 9 | What happens when nothing is found | `retrieve_with_fallback()`: the answer comes from the model's own knowledge, is labelled as such, and shows no sources. No web search and no outside service. Details in Decision 7 below. Decided 2026-11-19 |
 
 ---
 
@@ -264,19 +265,19 @@ result = RAGRetriever().search(
     role_family="technical",
     level="mid",
 )
-result.chunks      # best match first: .text, .similarity, .metadata, .citation
+result.chunks      # in MMR order, the first is the best match: .text, .similarity, .metadata, .citation
 result.citations   # one {title, url, licence, attribution} per page
 result.empty       # True when nothing usable was found
 ```
 
-`search()` is the way to read the two knowledge collections. The old `retrieve()` stays until task 11 moves the agents over, and task 15 removes it.
+`search()` is the way to read the two knowledge collections. The old `retrieve()` stays until task 11 moves the agents over, and task 15 removes it. Agents should not call `search()` directly. They call `retrieve_with_fallback()` (Decision 7), which wraps it.
 
 ### What one search does
 
 1. Check the arguments. A typo is an error, not an empty result.
 2. Build the filter (below) and ask ChromaDB for several times `top_k` candidates (4 times, and at least 20), because some will be dropped.
 3. Drop candidates below the similarity cutoff.
-4. Pick `top_k` of the rest, best first but varied (MMR), with at most 2 chunks from one page.
+4. Pick `top_k` of the rest with MMR: the first pick is the best match and each next one adds variety, with at most 2 chunks from one page.
 5. Return the chunks with their citations and counts, and log the counts and the time taken.
 
 ### The filter
@@ -317,7 +318,9 @@ These are starting values. Task 13 (the golden set) tunes them.
 - `candidates` is how many chunks passed the filters.
 - `below_cutoff` is how many of those were dropped as weak.
 
-Empty with `candidates` 0 means nothing matched the filters (for example a domain with no content). Empty with `below_cutoff` above 0 means chunks matched, but weakly. Task 10 (live lookup) and the empty-retrieval metric use this.
+Empty with `candidates` 0 means nothing matched the filters (for example a domain with no content). Empty with `below_cutoff` above 0 means chunks matched, but weakly. The fallback (Decision 7) and the empty-retrieval metric use this.
+
+`chunks` is in the order MMR picked them. The first is the best match. Each next one trades a little relevance for variety, so a later chunk can score lower than one that was left out. With `mmr=False` the order is plain best first.
 
 ### Why these choices
 
@@ -330,8 +333,86 @@ Empty with `candidates` 0 means nothing matched the filters (for example a domai
 ### What it does not do
 
 - It searches one collection per call. A caller that wants both makes two calls.
-- It does not look anything up live when the result is empty. That is task 10.
+- It does not decide what to do about an empty result. `retrieve_with_fallback()` does (Decision 7).
 - It is vector search only (no keyword search), and English only, because of the embedding model.
+
+---
+
+## Decision 7: when nothing is found (task 10)
+
+Code: `app/rag/fallback.py` (`retrieve_with_fallback()`).
+
+```python
+retrieval = retrieve_with_fallback(
+    "tell me about a time you led a project",
+    "interview_knowledge",
+    role_family="technical",
+    level="mid",
+)
+retrieval.grounded      # True when the answer can rest on reviewed chunks
+retrieval.route         # "knowledge" or "general_knowledge"
+retrieval.reason        # why it fell back (empty on the knowledge route)
+retrieval.chunks        # the chunks, only on the knowledge route
+retrieval.citations     # one {title, url, licence, attribution} per page, only on the knowledge route
+retrieval.prompt_note   # text for the model's prompt (empty when grounded)
+retrieval.user_note     # text to show the person (empty when grounded)
+```
+
+The options after the collection name go straight to `RAGRetriever.search()`.
+
+### The decision
+
+**When our own knowledge has nothing to offer, the answer comes from the model's own knowledge, is labelled as such, and shows no sources.** There is no web search, no live lookup and no outside service. Decided by the project owner on 2026-11-19.
+
+This replaces the original plan for task 10, which was a live web lookup on an empty result. Why it was dropped:
+
+| Option looked at | Why not |
+|---|---|
+| Brave Search MCP | It no longer has a free plan (the dashboard on 2026-11-19 showed a prepaid Search plan at $5.00 per 1,000 requests). Its output format is not documented, so it could not be proven without paying |
+| Tavily MCP | Its terms let Tavily and its AI providers use queries and outputs to train models. It is only a backup in the vetting log |
+| Google Programmable Search | Closed to new customers and shutting down on 2027-01-01 |
+| Groq `browser_search` | It works with the model we use, but its cost, output format and rules on storing results are not documented. It cannot be combined with structured outputs. Not tested |
+| Scraping a search engine | Fragile and against the terms of the engines |
+
+The owner chose not to pay for a search service or to rely on an outside one. Everything in the table stays possible later, but none is planned. See the open items.
+
+### The two routes
+
+| Route | When | What the caller gets |
+|---|---|---|
+| `knowledge` | At least one reviewed chunk matched | The chunks and their citations. No note |
+| `general_knowledge` | Nothing usable matched, or retrieval failed | No chunks and no citations. A note for the prompt and a note for the person |
+
+The reason on the general route:
+
+| Reason | Meaning |
+|---|---|
+| `no_match` | Nothing passed the filters (for example a domain with no content) |
+| `weak_match` | Chunks passed the filters, but all were below the similarity cutoff |
+| `empty_query` | There was nothing to search for |
+| `retrieval_error` | The vector store or the embedding model failed |
+
+### The two notes
+
+- **Prompt note (for the model):** "No reviewed source matched this request. Answer from general knowledge only. Do not invent sources, links or quotes, and do not present the answer as based on reviewed material."
+- **User note (for the screen):** "Not based on our reviewed sources. This comes from general knowledge, so check it before relying on it."
+
+Both are first-version wording. Task 11 puts the first into the prompt and task 16 shows the second.
+
+### Failure handling
+
+- **A retrieval failure never breaks an interview or a roadmap.** If the vector store or the embedding model raises, the error is logged with its traceback and the route is `general_knowledge` with the reason `retrieval_error`.
+- **A bad argument still raises.** A typo in `role_family`, `level` or `content_type`, or a collection name that is not a knowledge collection, raises `ValueError`, exactly as `search()` does. That is a bug in the calling code, so hiding it would be worse. It is raised even when the query is blank.
+
+### Logging
+
+One line per call: `fallback route=... reason=... collection=... candidates=... below_cutoff=...`. It has counts only and never the query text, so gaps in the knowledge base can be counted without writing anyone's words to the logs. Task 13 and the tracing work read this to measure how often the fallback happens.
+
+### What it does not do
+
+- It adds nothing to any collection and stores nothing. A general-knowledge answer is never saved as knowledge.
+- It does not check that the model obeyed the prompt note. The golden set (task 13) tests that answers on the general route carry no invented sources.
+- It is synchronous, like `search()`. Task 11 decides how the agents call it.
 
 ---
 
@@ -343,8 +424,9 @@ Empty with `candidates` 0 means nothing matched the filters (for example a domai
 | 6, 7 | **Built.** Source adapters fill the fields. The licence gate checks `licence`, `attribution` and `ingest_mode` |
 | 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. Both sources ran for real on 2026-11-19 |
 | 9 | **Built.** Retriever v2 (`RAGRetriever.search()`) filters on the fields above, skips expired chunks, and returns `title`, `url`, `licence` and `attribution` as citations |
-| 11, 12 | The agents return `sources[]` built from the chunk metadata |
-| 13, 14 | The evaluation set and tests cover the filters, idempotency and the licence gate |
+| 10 | **Built.** `retrieve_with_fallback()` (Decision 7). The original live web lookup was dropped on 2026-11-19 |
+| 11, 12 | The agents call `retrieve_with_fallback()` and return `sources[]` built from `citations`. On the general route they add `prompt_note` to the prompt, return `user_note` to the screen, and return no sources |
+| 13, 14 | The evaluation set and tests cover the filters, idempotency, the licence gate and the fallback (including that a general-knowledge answer carries no invented sources) |
 
 ---
 
@@ -360,7 +442,8 @@ Empty with `candidates` 0 means nothing matched the filters (for example a domai
 - The GitHub MCP server was confirmed on a real run on 2026-11-19 (image tag, `stdio` subcommand, response shape, folder listing). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
 - The retrieval defaults (cutoff 0.30, variety 0.7, 2 chunks per page) are starting values. Task 13 tunes them against the golden set.
-- `search()` reads one collection per call and has no live fallback. Task 10 adds the fallback for empty results.
+- **Live help for gaps (not planned).** Two ideas stay possible if the golden set shows the general-knowledge answers are too weak: a short list of trusted sites fetched live (our own topic-to-page table, nothing stored), or a test of Groq's `browser_search` for its cost, output format and storage rules. Each needs vetting first, and neither is scheduled.
+- The wording of the two fallback notes is a first version. Revisit it in tasks 11 and 16.
 
 ## Changelog
 
@@ -371,3 +454,4 @@ Empty with `candidates` 0 means nothing matched the filters (for example a domai
 | 2026-11-19 | Added Decision 5: the ingest command and expiry sweep (task 8). Updated the status, the source checklist and the open items |
 | 2026-11-19 | Recorded the first real ingest of both sources (45 Handbook pages, 41 roadmap.sh links) and what it confirmed about the GitHub server and ChromaDB |
 | 2026-11-19 | Added Decision 6: retrieval (task 9). Marked task 9 built, removed the `RetrieverAgent` finding, and added two open items |
+| 2026-11-19 | Added Decision 7: the fallback when nothing is found (task 10). The live web lookup was dropped, so no search provider is used. Fixed the wording on result order in Decision 6 and updated the open items |
