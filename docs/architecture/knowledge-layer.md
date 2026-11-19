@@ -1,9 +1,9 @@
 # Knowledge Layer Design
 
-How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, and what happens when it finds nothing.
+How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, what happens when it finds nothing, and how the interview and learning-plan agents use all of that.
 
-**Tracker:** Phase 7, tasks 2 to 10. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). No agent uses either yet (task 11).
+**Tracker:** Phase 7, tasks 2 to 11. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8).
 
 ---
 
@@ -20,6 +20,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). After each run, chunks of that source that are past `expires_at` are removed |
 | 8 | How content is found | `RAGRetriever.search()`: filters in ChromaDB, skips expired chunks, drops weak matches, avoids near-duplicates, returns citations. Details in Decision 6 below |
 | 9 | What happens when nothing is found | `retrieve_with_fallback()`: the answer comes from the model's own knowledge, is labelled as such, and shows no sources. No web search and no outside service. Details in Decision 7 below. Decided 2026-11-19 |
+| 10 | How the agents use it | Both agents call `retrieve_with_fallback()` in a worker thread, put the text into the prompt as untrusted data, and return `sources` and `notice`. A link in a learning plan must come from a retrieved page. Details in Decision 8 below |
 
 ---
 
@@ -98,7 +99,7 @@ Five topic-based collections are replaced by two content-based ones. Topic, role
 
 Searches filter on `domain`, `role_family`, `level` and `content_type`, and always on `schema_version = 2`.
 
-**Why new names instead of reusing `learning_resources`:** the old agents keep working until they are rewired in task 11, and task 15 can delete the old five collections cleanly without any risk to the new ones. This differs from the example names in the tracker for that reason only.
+**Why new names instead of reusing `learning_resources`:** the old agents kept working until they were rewired in task 11, and task 15 can delete the old five collections cleanly without any risk to the new ones. This differs from the example names in the tracker for that reason only.
 
 **Old data:** the 119 old chunks have no recorded source or licence, so under the rule above they cannot be loaded into the new collections. They remain in the local snapshot and are deleted from ChromaDB in task 15, **only after** the new evaluation set passes.
 
@@ -270,7 +271,7 @@ result.citations   # one {title, url, licence, attribution} per page
 result.empty       # True when nothing usable was found
 ```
 
-`search()` is the way to read the two knowledge collections. The old `retrieve()` stays until task 11 moves the agents over, and task 15 removes it. Agents should not call `search()` directly. They call `retrieve_with_fallback()` (Decision 7), which wraps it.
+`search()` is the way to read the two knowledge collections. The interview and roadmap agents moved off the old `retrieve()` in task 11. It stays only until task 15, which checks for any remaining caller and removes it together with the old collections. Agents should not call `search()` directly. They call `retrieve_with_fallback()` (Decision 7), which wraps it.
 
 ### What one search does
 
@@ -397,7 +398,7 @@ The reason on the general route:
 - **Prompt note (for the model):** "No reviewed source matched this request. Answer from general knowledge only. Do not invent sources, links or quotes, and do not present the answer as based on reviewed material."
 - **User note (for the screen):** "Not based on our reviewed sources. This comes from general knowledge, so check it before relying on it."
 
-Both are first-version wording. Task 11 puts the first into the prompt and task 16 shows the second.
+Both are first-version wording. Task 11 puts the first into the prompt and returns the second as `notice`. Task 16 shows it on the screen.
 
 ### Failure handling
 
@@ -412,7 +413,42 @@ One line per call: `fallback route=... reason=... collection=... candidates=... 
 
 - It adds nothing to any collection and stores nothing. A general-knowledge answer is never saved as knowledge.
 - It does not check that the model obeyed the prompt note. The golden set (task 13) tests that answers on the general route carry no invented sources.
-- It is synchronous, like `search()`. Task 11 decides how the agents call it.
+- It is synchronous, like `search()`. The agents call it from a worker thread (Decision 8).
+
+---
+
+## Decision 8: how the agents use it (task 11)
+
+Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_agent.py`, `app/llm/prompts/roadmap_prompts.py`, `app/services/interview_service.py`, `app/graphs/candidate_graph.py` and `SourceItem` in `app/database/schemas.py`. The endpoints are in `docs/api/api-reference.md`.
+
+| | Roadmap agent | Interview agent |
+|---|---|---|
+| Collection | `learning_knowledge` | `interview_knowledge` |
+| Search | One per skill gap: "learning resources for {skill}", top 3 each. Merged, deduplicated by chunk, best match first, at most 12 | One: "{company} {role} interview questions", top 5 |
+| Prompt size | 500 characters per chunk | 3000 characters in all, at most 700 per chunk. A chunk is included whole up to its cap or left out |
+| Filters | None | None |
+| `sources` returned | The reviewed pages the plan actually links to | The reviewed pages that went into the prompt |
+| `notice` returned | When the plan has weeks but links to no reviewed page | When no reviewed material was used |
+| Where it reaches the caller | `GET /api/candidate/learning-plan` | `POST /api/candidate/interview/start` only |
+
+**Rules both agents follow**
+
+- **Retrieval runs in a worker thread.** `search()` is synchronous (embedding and a Chroma call), so calling it from an async agent blocked the event loop. The old roadmap agent did exactly that.
+- **Retrieved text is data.** It goes into the prompt through `wrap_untrusted()`, so a page cannot close the data block early or give the model orders. If nothing matched, the prompt gets the fallback's prompt note instead.
+- **A retrieval failure never breaks the agent.** Any error, including a bad argument, is logged and the agent carries on with the general-knowledge route. The roadmap agent also carries on when only one skill's search fails.
+- **A canned reply claims nothing.** If the model fails and the agent uses a standard opening question, `sources` is empty and `notice` is `null`, because the question is not based on anything retrieved. The same holds for a roadmap that could not be generated.
+
+**Links in a learning plan.** The model may only use links from the pages that were retrieved for this request.
+- A link that was retrieved gets that page's real title, so a wrong title cannot sit on a real link.
+- A link that was not retrieved is made up, and its entry is dropped.
+- An entry with no link is a generic suggestion ("Official documentation") and is kept.
+- Each resource is `{title, url, type}`. The old `source` key is gone.
+
+**What `sources` means.** For a learning plan it is exact: the pages the plan links to. For an interview it is looser. The model is told to use the material for flavour and not to quote it, so `sources` lists the pages that could have shaped the opening question, not a claim about any sentence in it.
+
+**What is not stored.** The interview `sources` and `notice` are returned once, with the first question. They are not saved in the session row or in Redis, and the later questions come from the transcript, not from reference material.
+
+**Known limit: no role filter.** Neither agent filters on `role_family`, because the agents do not yet know a role's family. `interview_knowledge` holds only software-engineering content, so a non-technical role can get weakly related chunks above the cutoff. The golden set (task 13) measures how often, and Phase 9 adds a role-to-family mapping.
 
 ---
 
@@ -425,7 +461,8 @@ One line per call: `fallback route=... reason=... collection=... candidates=... 
 | 8 | **Built.** `python -m app.ingest.run` runs the adapters and the pipeline. Refresh uses `content_hash`; expiry uses `expires_at_ts`. Both sources ran for real on 2026-11-19 |
 | 9 | **Built.** Retriever v2 (`RAGRetriever.search()`) filters on the fields above, skips expired chunks, and returns `title`, `url`, `licence` and `attribution` as citations |
 | 10 | **Built.** `retrieve_with_fallback()` (Decision 7). The original live web lookup was dropped on 2026-11-19 |
-| 11, 12 | The agents call `retrieve_with_fallback()` and return `sources[]` built from `citations`. On the general route they add `prompt_note` to the prompt, return `user_note` to the screen, and return no sources |
+| 11 | **Built.** The interview and roadmap agents call `retrieve_with_fallback()` and return `sources` built from the citations, plus `notice` (Decision 8). The prompt note goes into the prompt on the general route. A learning plan can only link to retrieved pages |
+| 12 | Learning-plan links get a health check, and the links are shown with their credit |
 | 13, 14 | The evaluation set and tests cover the filters, idempotency, the licence gate and the fallback (including that a general-knowledge answer carries no invented sources) |
 
 ---
@@ -434,6 +471,7 @@ One line per call: `fallback route=... reason=... collection=... candidates=... 
 
 - `RetrieverAgent` (`agents/shared/retriever_agent.py`) was used nowhere and could not have worked: it `await`ed a function that is not async and passed `collection=` where the retriever expects `collection_name=`. Removed in task 9.
 - The real ingest runs on 2026-11-19 worked with ChromaDB's `upsert`, `get` with `where`, and `update` calls, and ChromaDB accepted the expiry filter (`$lte` on `expires_at_ts`, inside `$and` for one source). That filter matched nothing so far, and `delete` has not run for real. The retriever's filters (`$in`, `$gt`, `$and`) and the `embeddings` option were checked against an in-memory ChromaDB 0.5.23 (the version this project pins), which also ran the expiry sweep end to end. They have not yet run against the ChromaDB container with the real embedding model. The unit tests use a fake store. Task 14 proves all of this against the real client.
+- The old roadmap agent called the synchronous `retrieve()` straight from an async method, which blocked the event loop for the length of every search. Fixed in task 11 (Decision 8).
 
 ## Open items
 
@@ -443,7 +481,12 @@ One line per call: `fallback route=... reason=... collection=... candidates=... 
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
 - The retrieval defaults (cutoff 0.30, variety 0.7, 2 chunks per page) are starting values. Task 13 tunes them against the golden set.
 - **Live help for gaps (not planned).** Two ideas stay possible if the golden set shows the general-knowledge answers are too weak: a short list of trusted sites fetched live (our own topic-to-page table, nothing stored), or a test of Groq's `browser_search` for its cost, output format and storage rules. Each needs vetting first, and neither is scheduled.
-- The wording of the two fallback notes is a first version. Revisit it in tasks 11 and 16.
+- The wording of the two fallback notes is a first version. Revisit it in task 16, when the screen shows the notice.
+- **No role filter in the agents (known limit).** See Decision 8. Non-technical roles may get weak software chunks until Phase 9 adds a role-to-family mapping. Task 13 measures it.
+- **The interview prompt still says "Reference material from real interviews".** The knowledge base holds preparation guides, not real interviews, so the wording is a little off. Fix it when the prompt is next touched.
+- **The frontend still reads the old resource `source` key.** `AnalysisView.tsx` uses it only as a tooltip. Task 16 updates it and shows `sources` and `notice`.
+- **The context budgets are starting values.** 12 resources and 500 characters per chunk for the roadmap; 3000 characters and 700 per chunk for the interview. Task 13 can tune them.
+- **The agents have not run against the real ChromaDB.** Their unit tests use a stand-in retriever. Task 14 runs them against the real client with the 60 learning chunks and 829 interview chunks.
 
 ## Changelog
 
@@ -455,3 +498,4 @@ One line per call: `fallback route=... reason=... collection=... candidates=... 
 | 2026-11-19 | Recorded the first real ingest of both sources (45 Handbook pages, 41 roadmap.sh links) and what it confirmed about the GitHub server and ChromaDB |
 | 2026-11-19 | Added Decision 6: retrieval (task 9). Marked task 9 built, removed the `RetrieverAgent` finding, and added two open items |
 | 2026-11-19 | Added Decision 7: the fallback when nothing is found (task 10). The live web lookup was dropped, so no search provider is used. Fixed the wording on result order in Decision 6 and updated the open items |
+| 2026-11-19 | Added Decision 8: how the agents use the knowledge layer (task 11). The interview and roadmap agents now read the new collections through `retrieve_with_fallback()` and return `sources` and `notice`. Marked task 11 built, updated the status and the task table, and added five open items and one finding |

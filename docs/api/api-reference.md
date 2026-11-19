@@ -7,7 +7,7 @@ who may call it, what it accepts and what it returns.
 > (path, method, role, request body, response shape, status code or error message)
 > must update this file **in the same commit**. See [Updating this file](#updating-this-file).
 
-Last reviewed: 2026-11-09 (Phase 6)
+Last reviewed: 2026-11-19 (Phase 7)
 
 ---
 
@@ -348,13 +348,36 @@ Response (`LearningPlanResponse`):
       "week": 1,
       "topic": "SQL joins",
       "tasks": ["..."],
-      "resources": [{ "title": "...", "url": "https://...", "type": "article" }],
+      "resources": [
+        { "title": "SQL Roadmap", "url": "https://...", "type": "roadmap" },
+        { "title": "Official documentation", "url": "", "type": "docs" }
+      ],
       "estimated_hours": 6
     }
   ],
-  "summary": "..."
+  "summary": "...",
+  "sources": [
+    {
+      "title": "SQL Roadmap",
+      "url": "https://...",
+      "licence": "proprietary",
+      "attribution": "SQL Roadmap, roadmap.sh (link only)"
+    }
+  ],
+  "notice": null
 }
 ```
+
+The plan is built from reviewed learning material where we have it.
+
+| Field | Meaning |
+|---|---|
+| `weeks[].resources[]` | Each entry has `title`, `url` and `type`. A link is only ever one of the reviewed pages found for this request, and it always carries that page's real title. An entry with an empty `url` is a generic suggestion (for example "Official documentation"). |
+| `sources` | The reviewed pages the plan links to, one entry per page: `title`, `url`, `licence` and `attribution` (the credit line to show next to the link). Empty when the plan links to none. The values in the example are illustrative. |
+| `notice` | `null` normally. Set to a short message when the plan is not based on any reviewed source, because nothing matched or the plan links to none. It then comes from general knowledge and should be checked before relying on it. Not set for an empty plan or when the plan could not be generated. |
+
+A resource entry no longer has a `source` key (an earlier internal field). Use `url` and
+the `sources` list instead.
 
 ### Mock interview
 
@@ -368,8 +391,32 @@ Body (JSON): `company` and `role`, each 1 to 100 characters and not blank.
 Response (`InterviewStartResponse`):
 
 ```json
-{ "session_id": "...", "question": "Tell me about ...", "question_number": 1, "max_questions": 6 }
+{
+  "session_id": "...",
+  "question": "Tell me about ...",
+  "question_number": 1,
+  "max_questions": 6,
+  "sources": [
+    {
+      "title": "Behavioral interview guide",
+      "url": "https://...",
+      "licence": "MIT",
+      "attribution": "Tech Interview Handbook, MIT licence"
+    }
+  ],
+  "notice": null
+}
 ```
+
+| Field | Meaning |
+|---|---|
+| `sources` | The reviewed pages the opening question could draw on, one entry per page: `title`, `url`, `licence` and `attribution`. Empty when no reviewed material was used. |
+| `notice` | `null` normally. Set to a short message when the opening question is not based on reviewed sources. It then comes from general knowledge and should be checked before relying on it. |
+
+`sources` and `notice` appear only in this response, with the first question. They are not
+saved with the session, so `GET /api/candidate/interview/{session_id}` and the respond
+endpoint do not return them. If the opening question could not be generated and a standard
+opening was used instead, `sources` is empty and `notice` is `null`.
 
 #### `GET /api/candidate/interview/{session_id}`
 
@@ -604,6 +651,8 @@ Newest first. Add one line per API change.
 
 | Date | Phase | Change |
 |---|---|---|
+| 2026-11-19 | 7 | `GET /api/candidate/learning-plan` now returns `sources` and `notice`. Week resources are `{title, url, type}`: links come only from reviewed pages, an empty `url` marks a generic suggestion, and the old `source` key is gone. |
+| 2026-11-19 | 7 | `POST /api/candidate/interview/start` now returns `sources` and `notice`. Both are optional additions, so existing clients keep working. |
 | 2026-11-09 | 6 | Added this reference. Documents all existing endpoints. |
 | Phase 6 | 6 | Added `GET /api/health/mcp` (MCP gateway health). |
 | Phase 5 | 5 | Added recruiter endpoints: JD upload, JD list, rank candidates, interview questions, hiring recommendation. |
@@ -628,7 +677,7 @@ Do this whenever an endpoint changes:
 3. **Removed endpoint:** delete its section and index row, and add a changelog row.
 4. **Always:** update "Last reviewed" at the top and the changelog.
 5. **Check against the code:** compare with the route file, the schema in
-   `backend/app/models/schemas.py` and the service that raises the errors. Copy error
+   `backend/app/database/schemas.py` and the service that raises the errors. Copy error
    messages exactly. If you are not sure of a value, check the code or `/api/docs`
    instead of guessing.
 6. **Same commit:** the doc change goes in the same commit as the code change, so a
