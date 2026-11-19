@@ -1,43 +1,72 @@
 """InterviewAgent — plays the interviewer in a mock interview via Groq.
 
 Flow:
-  1. start_session(): optionally pull reference interview material from ChromaDB,
-     then ask the opening question.
+  1. start_session(): pull reference material from the interview_knowledge collection
+     (through retrieve_with_fallback), then ask the opening question.
   2. followup(): given the transcript so far, ask the next question.
 
 Design notes:
   - Never raises. If the LLM fails we return a sensible generic question so the
     session keeps moving instead of 500-ing mid-interview.
-  - RAG is *enrichment*, not a requirement. RAGRetriever.retrieve() is synchronous
-    (embedding + Chroma HTTP), so it runs in a worker thread, and any failure or
-    empty collection simply means we prompt without reference material.
+  - RAG is *enrichment*, not a requirement. If nothing reviewed matches (or Chroma is
+    down) the prompt says to use general knowledge, and the result carries a `notice`
+    so the app can tell the candidate the question is not based on reviewed sources.
+  - `sources` lists the reviewed pages that went into the prompt. The model uses the
+    material for flavour and is told not to quote it, so these are the pages the
+    question could draw on, not a claim about any single sentence.
+  - search() is synchronous (embedding + Chroma HTTP), so it runs in a worker thread.
+  - Only the opening question uses reference material. Follow-ups work from the
+    transcript.
 """
 
 import asyncio
 import logging
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.ingest.schema import INTERVIEW_COLLECTION
 from app.llm.models import get_llm
 from app.llm.prompts.interview_prompts import FOLLOWUP_PROMPT, INTERVIEW_PROMPT
+from app.mcp import security
+from app.rag.fallback import (
+    GENERAL_KNOWLEDGE_PROMPT_NOTE,
+    GENERAL_KNOWLEDGE_USER_NOTE,
+    retrieve_with_fallback,
+)
 from app.rag.retriever import RAGRetriever
 
 logger = logging.getLogger(__name__)
 
 
-# Collections that can hold company/role interview material. Both are optional.
-REFERENCE_COLLECTIONS = ("company_interviews", "interview_experiences")
-TOP_K_PER_COLLECTION = 3
-SIMILARITY_THRESHOLD = 0.30  # below this = weak match, dropped as noise
-MAX_CONTEXT_CHARS = 1800  # keep the prompt small; the LLM only needs a flavour
+COLLECTION = INTERVIEW_COLLECTION
+TOP_K = 5
+# The prompt only needs a flavour of the material, so it is capped. Chunks are
+# whole passages, so each one gets a share of the budget.
+MAX_CONTEXT_CHARS = 3000
+MAX_CHUNK_CHARS = 700
+MIN_CHUNK_CHARS = 200  # a chunk with less room than this is left out, not squeezed in
 MAX_HISTORY_MESSAGES = 12  # last 6 exchanges is plenty of context
 
-NO_REFERENCE = (
-    "No reference material available. Rely on your general knowledge of how "
-    "this company interviews."
-)
+
+@dataclass(frozen=True)
+class _Reference:
+    """What retrieval gave the opening question."""
+
+    text: str = ""  # the block that goes into the prompt ("" if nothing matched)
+    sources: list[dict] = field(default_factory=list)  # one citation per page
+
+    @property
+    def grounded(self) -> bool:
+        return bool(self.text)
+
+    def prompt_text(self) -> str:
+        """The `experiences` input of the prompt. Outside text, so it is marked as data."""
+        if not self.text:
+            return GENERAL_KNOWLEDGE_PROMPT_NOTE
+        return security.wrap_untrusted(COLLECTION, self.text)
 
 
 class InterviewAgent:
@@ -68,19 +97,30 @@ class InterviewAgent:
         """Ask the opening question.
 
         Returns:
-            {"question": str, "session_started": True, "used_rag": bool}
+            {
+                "question": str,
+                "session_started": True,
+                "grounded": bool,        # reviewed material went into the prompt
+                "sources": list[dict],   # title/url/licence/attribution, one per page
+                "notice": str | None,    # set when the question is not based on reviewed sources
+            }
         """
         company = (company or "").strip() or "the company"
         role = (role or "").strip() or "the role"
 
         reference = await asyncio.to_thread(self._retrieve_context, company, role)
+        logger.info(
+            "InterviewAgent retrieved %d sources (grounded=%s)",
+            len(reference.sources),
+            reference.grounded,
+        )
 
         try:
             response = await self.start_chain.ainvoke(
                 {
                     "company": company,
                     "role": role,
-                    "experiences": reference or NO_REFERENCE,
+                    "experiences": reference.prompt_text(),
                     "max_questions": max_questions,
                 }
             )
@@ -90,15 +130,25 @@ class InterviewAgent:
             question = ""
 
         if not question:
-            question = (
-                f"Thanks for joining. To start, could you walk me through your "
-                f"background and what draws you to the {role} role at {company}?"
-            )
+            # The canned opener is not based on anything we retrieved, so it claims
+            # no sources and needs no notice.
+            return {
+                "question": (
+                    f"Thanks for joining. To start, could you walk me through your "
+                    f"background and what draws you to the {role} role at {company}?"
+                ),
+                "session_started": True,
+                "grounded": False,
+                "sources": [],
+                "notice": None,
+            }
 
         return {
             "question": question,
             "session_started": True,
-            "used_rag": bool(reference),
+            "grounded": reference.grounded,
+            "sources": reference.sources,
+            "notice": None if reference.grounded else GENERAL_KNOWLEDGE_USER_NOTE,
         }
 
     async def followup(
@@ -152,33 +202,46 @@ class InterviewAgent:
             lines.append(f"{speaker}: {msg.get('content', '')}")
         return "\n".join(lines) if lines else "(no conversation yet)"
 
-    def _retrieve_context(self, company: str, role: str) -> str:
-        """Sync: query reference collections, return a compact text block ('' if none).
+    def _retrieve_context(self, company: str, role: str) -> _Reference:
+        """Sync: search the interview knowledge, return a compact block and its sources.
 
         Any failure (collection empty/missing, Chroma down) is swallowed — RAG here
-        is a nice-to-have.
+        is a nice-to-have. Weak matches are already dropped by search() itself.
         """
         query = f"{company} {role} interview questions"
-        snippets: list[str] = []
-        seen: set[str] = set()
+        try:
+            retrieval = retrieve_with_fallback(
+                query, COLLECTION, retriever=self.retriever, top_k=TOP_K
+            )
+        except Exception as e:
+            logger.warning(f"InterviewAgent: retrieval failed: {e}")
+            return _Reference()
 
-        for collection in REFERENCE_COLLECTIONS:
-            try:
-                docs = self.retriever.retrieve(
-                    collection, query, top_k=TOP_K_PER_COLLECTION
-                )
-            except Exception as e:
-                logger.info(f"InterviewAgent: no RAG context from {collection}: {e}")
+        blocks: list[str] = []
+        sources: list[dict] = []
+        listed: set[str] = set()
+        used = 0
+
+        for chunk in retrieval.chunks:
+            text = (chunk.text or "").strip()
+            if not text:
                 continue
+            citation = chunk.citation
+            prefix = f"- {citation['title']}: "
+            room = MAX_CONTEXT_CHARS - used - len(prefix)
+            if room < MIN_CHUNK_CHARS:
+                break  # the budget is spent
 
-            for doc in docs:
-                text = (doc.document or "").strip()
-                if doc.similarity < SIMILARITY_THRESHOLD or not text or text in seen:
-                    continue
-                seen.add(text)
-                snippets.append(f"- {text}")
+            block = prefix + text[: min(MAX_CHUNK_CHARS, room)]
+            blocks.append(block)
+            used += len(block) + 1  # +1 for the newline
 
-        return "\n".join(snippets)[:MAX_CONTEXT_CHARS]
+            key = citation["url"] or chunk.id
+            if key not in listed:
+                listed.add(key)
+                sources.append(citation)
+
+        return _Reference(text="\n".join(blocks), sources=sources)
 
     @staticmethod
     def _clean(content: Any) -> str:
