@@ -1,0 +1,307 @@
+# Link-only source: official documentation and learning guides (Phase 7, task 12)
+#
+# These are the front doors of documentation that the tool's own makers publish: the
+# language, framework, platform or standards body behind the skill. They are the most
+# trusted links in a learning plan, because the people who build the tool keep them up
+# to date.
+#
+# We copy nothing. Each entry is a link, a title, and one plain sentence that we wrote
+# ourselves. Every page belongs to its publisher, so the licence is recorded as
+# "proprietary" (link only), the same way roadmap.sh is.
+#
+# Choosing an address:
+#   - Use the top page of a guide or tutorial, never a deep page. Deep pages move.
+#   - Write the address the way `normalise_url()` would: https, no trailing slash
+#     (except a site root), no tracking parameters.
+#   - Write the summary about what the reader will learn, in our own words.
+#
+# These addresses were written from knowledge of the sites and have NOT yet been tested
+# on the live web. Run the link check (python -m app.ingest.run --source official-docs
+# --dry-run) from a machine with internet access. A page that answers 404 or 410 is
+# dropped and listed in the report, and a replacement address can then be added here.
+# Sites that block bots (403, 429) are kept, as the check cannot tell.
+
+source_id: official-docs
+site: https://developer.mozilla.org
+licence: proprietary
+attribution: "Official documentation, owned by each publisher. Link only: no content is copied."
+content_type: docs
+
+entries:
+  # ── Web ────────────────────────────────────────────────────────────────
+  - url: https://developer.mozilla.org/en-US/docs/Learn_web_development
+    title: "MDN: Learn web development"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "A beginner-friendly course from the browser makers' reference site that takes you from first web page to working front-end developer."
+  - url: https://developer.mozilla.org/en-US/docs/Web/JavaScript
+    title: "MDN: JavaScript"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "The reference and guides for the JavaScript language: syntax, built-in objects, and how the language works in the browser."
+  - url: https://developer.mozilla.org/en-US/docs/Web/HTML
+    title: "MDN: HTML"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Guides and reference for HTML, the markup that gives a web page its structure and meaning."
+  - url: https://developer.mozilla.org/en-US/docs/Web/CSS
+    title: "MDN: CSS"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Guides and reference for CSS, the language that controls layout, colour and typography on the web."
+  - url: https://developer.mozilla.org/en-US/docs/Web/HTTP
+    title: "MDN: HTTP"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "An explanation of how browsers and servers talk to each other, with the reference for methods, status codes and headers."
+  - url: https://react.dev/learn
+    title: "React: Learn"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The official React tutorial and guide for building user interfaces from components, with interactive examples."
+  - url: https://www.typescriptlang.org/docs
+    title: "TypeScript documentation"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "The official handbook and reference for adding types to JavaScript so that mistakes are caught before the code runs."
+  - url: https://nodejs.org/en/learn
+    title: "Node.js: Learn"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Official introductory guides for running JavaScript on the server with Node.js."
+  - url: https://www.w3.org/WAI/fundamentals/accessibility-intro
+    title: "W3C: Introduction to web accessibility"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A short introduction from the web standards body on why accessibility matters and how people with disabilities use the web."
+
+  # ── Languages ──────────────────────────────────────────────────────────
+  - url: https://docs.python.org/3/tutorial
+    title: "Python tutorial"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The official step-by-step tutorial that introduces the main features of the Python language."
+  - url: https://go.dev/doc/tutorial
+    title: "Go tutorials"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Official hands-on tutorials for getting started with Go, from installing it to writing a small web service."
+  - url: https://doc.rust-lang.org/book
+    title: "The Rust Programming Language"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "The official book that teaches Rust, including ownership, the idea that sets the language apart."
+  - url: https://dev.java/learn
+    title: "Dev.java: Learn"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Official tutorials and guides for learning Java and its tools, published by the Java team."
+  - url: https://spring.io/guides
+    title: "Spring guides"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "Short official guides for building Java applications with Spring, each one focused on a single task."
+
+  # ── Backend and data stores ────────────────────────────────────────────
+  - url: https://fastapi.tiangolo.com/tutorial
+    title: "FastAPI tutorial"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The official step-by-step guide for building web APIs in Python with FastAPI."
+  - url: https://docs.sqlalchemy.org/en/20/tutorial
+    title: "SQLAlchemy tutorial"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "The official tutorial for talking to relational databases from Python with SQLAlchemy."
+  - url: https://www.postgresql.org/docs/current/tutorial.html
+    title: "PostgreSQL tutorial"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The official introduction to PostgreSQL: creating tables, running queries and using common features."
+  - url: https://www.sqlite.org/docs.html
+    title: "SQLite documentation"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The documentation index for SQLite, a small database that lives in a single file."
+  - url: https://redis.io/docs/latest
+    title: "Redis documentation"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "The official guides for Redis, an in-memory data store used for caching, queues and fast lookups."
+
+  # ── Tools, delivery and cloud ──────────────────────────────────────────
+  - url: https://git-scm.com/book/en/v2
+    title: "Pro Git"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The free book on Git from its project site, covering everyday commands through to how Git stores history."
+  - url: https://docs.docker.com/get-started
+    title: "Docker: Get started"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The official first steps with Docker: what a container is and how to build and run your own."
+  - url: https://kubernetes.io/docs/tutorials
+    title: "Kubernetes tutorials"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "Official hands-on tutorials for running and scaling containerised applications on Kubernetes."
+  - url: https://docs.github.com/en/actions
+    title: "GitHub Actions documentation"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "Official guides for automating tests, builds and deployments from a GitHub repository."
+  - url: https://developer.hashicorp.com/terraform/docs
+    title: "Terraform documentation"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "The official documentation for describing cloud infrastructure as code with Terraform."
+  - url: https://aws.amazon.com/getting-started
+    title: "AWS: Getting started"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Amazon's own starting point for learning its cloud services, with guided paths and tutorials."
+  - url: https://cloud.google.com/docs
+    title: "Google Cloud documentation"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "The home of Google's official documentation for its cloud products, with quickstarts and tutorials."
+  - url: https://learn.microsoft.com/en-us/azure
+    title: "Microsoft Learn: Azure documentation"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "Microsoft's official documentation and tutorials for its Azure cloud platform."
+  - url: https://learn.microsoft.com/en-us/azure/architecture
+    title: "Azure Architecture Center"
+    domain: software-engineering
+    role_family: technical
+    level: senior
+    summary: "Guidance on designing cloud systems, with architecture patterns and best practices that apply beyond one vendor."
+  - url: https://12factor.net/
+    title: "The Twelve-Factor App"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "A short, widely cited set of principles for building software that is easy to deploy and run as a service."
+  - url: https://owasp.org/www-project-top-ten
+    title: "OWASP Top Ten"
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "The security community's list of the most common web application risks, with guidance on avoiding them."
+
+  # ── Mobile ─────────────────────────────────────────────────────────────
+  - url: https://developer.android.com/courses
+    title: "Android Developers: Courses"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Google's official learning paths for building Android apps."
+  - url: https://developer.apple.com/tutorials/swiftui
+    title: "Apple: SwiftUI tutorials"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "Apple's official step-by-step tutorials for building iPhone and iPad apps with SwiftUI."
+
+  # ── Data and machine learning ──────────────────────────────────────────
+  - url: https://pandas.pydata.org/docs/user_guide/index.html
+    title: "pandas user guide"
+    domain: data
+    role_family: technical
+    level: entry
+    summary: "The official guide to loading, cleaning and analysing tables of data in Python with pandas."
+  - url: https://numpy.org/doc/stable/user/index.html
+    title: "NumPy user guide"
+    domain: data
+    role_family: technical
+    level: entry
+    summary: "The official guide to fast numerical arrays in Python, the base that most data libraries build on."
+  - url: https://scikit-learn.org/stable/user_guide.html
+    title: "scikit-learn user guide"
+    domain: data
+    role_family: technical
+    level: mid
+    summary: "The official guide to classic machine learning in Python: models, evaluation and preparing data."
+  - url: https://pytorch.org/tutorials
+    title: "PyTorch tutorials"
+    domain: data
+    role_family: technical
+    level: mid
+    summary: "Official tutorials for building and training neural networks with PyTorch."
+  - url: https://langchain-ai.github.io/langgraph
+    title: "LangGraph documentation"
+    domain: data
+    role_family: technical
+    level: mid
+    summary: "The official guides for building agents and multi-step workflows around language models with LangGraph."
+  - url: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/overview
+    title: "Claude: Prompt engineering overview"
+    domain: data
+    role_family: technical
+    level: all
+    summary: "Anthropic's guide to writing clear prompts for language models, with techniques and examples."
+  - url: https://learn.microsoft.com/en-us/power-bi
+    title: "Power BI documentation"
+    domain: data
+    role_family: non_technical
+    level: entry
+    summary: "Microsoft's official guides for turning data into reports and dashboards with Power BI."
+
+  # ── Work skills for non-technical roles ────────────────────────────────
+  - url: https://scrumguides.org/scrum-guide.html
+    title: "The Scrum Guide"
+    domain: operations
+    role_family: all
+    level: all
+    summary: "The short official definition of Scrum, the way many teams plan and deliver work in small steps."
+  - url: https://www.atlassian.com/agile
+    title: "Atlassian: Agile coach"
+    domain: product
+    role_family: all
+    level: entry
+    summary: "A practical set of guides to agile ways of working, including sprints, backlogs and team rituals."
+  - url: https://support.microsoft.com/en-us/excel
+    title: "Microsoft Excel help"
+    domain: finance
+    role_family: non_technical
+    level: entry
+    summary: "Microsoft's official help and training for Excel, covering formulas, tables and charts."
+  - url: https://support.google.com/analytics
+    title: "Google Analytics Help"
+    domain: marketing
+    role_family: non_technical
+    level: entry
+    summary: "Google's official help centre for measuring how people find and use a website or app."
+  - url: https://help.figma.com/
+    title: "Figma Help Center"
+    domain: design
+    role_family: non_technical
+    level: entry
+    summary: "The official guides for designing screens and prototypes in Figma, from the first file to team libraries."

@@ -140,11 +140,106 @@ async def test_get_answer_wins_over_a_refused_head():
     assert result.http_status == 404
 
 
-async def test_head_404_does_not_trigger_a_get():
+def head_then_get(
+    head: int | Exception, get: int | Exception, seen: list | None = None
+):
+    """A handler whose HEAD and GET answers differ. Either can be an exception."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append((request.method, request.headers.get("range")))
+        answer = head if request.method == "HEAD" else get
+        if isinstance(answer, Exception):
+            raise answer
+        return httpx.Response(answer)
+
+    return handler
+
+
+@pytest.mark.parametrize("code", [404, 410])
+async def test_a_page_that_is_ok_for_get_is_not_broken_just_because_head_said_gone(
+    code,
+):
+    # support.google.com answers HEAD with 404 although the page is there.
+    seen: list = []
+    url = f"{HOST}/page"
+    result = (await run(head_then_get(code, 200, seen), [url]))[url]
+    assert result.status is LinkStatus.OK
+    assert result.http_status == 200
+    assert seen == [("HEAD", None), ("GET", "bytes=0-0")]
+
+
+@pytest.mark.parametrize("code", [404, 410])
+async def test_a_page_is_broken_only_when_head_and_get_both_say_gone(code):
     seen: list = []
     url = f"{HOST}/gone"
-    await run(by_path({"/gone": 404}, seen), [url])
-    assert [m for m, _, _ in seen] == ["HEAD"]
+    result = (await run(head_then_get(code, code, seen), [url]))[url]
+    assert result.status is LinkStatus.BROKEN
+    assert result.reason == f"HTTP {code}"
+    assert [m for m, _ in seen] == ["HEAD", "GET"]
+
+
+async def test_head_404_then_get_410_is_broken_with_the_get_code():
+    url = f"{HOST}/gone"
+    result = (await run(head_then_get(404, 410), [url]))[url]
+    assert result.status is LinkStatus.BROKEN
+    assert result.http_status == 410
+
+
+@pytest.mark.parametrize("get", [403, 429, 503])
+async def test_head_404_then_a_get_that_cannot_judge_is_unknown_and_kept(get):
+    url = f"{HOST}/page"
+    result = (await run(head_then_get(404, get), [url]))[url]
+    assert result.status is LinkStatus.UNKNOWN
+    assert result.http_status == get
+    assert result.keep is True
+
+
+async def test_head_404_then_a_get_that_times_out_is_unknown_and_kept():
+    url = f"{HOST}/page"
+    handler = head_then_get(404, httpx.ReadTimeout("slow"))
+    result = (await run(handler, [url]))[url]
+    assert result.status is LinkStatus.UNKNOWN
+    assert result.reason == "timed out"
+    assert result.keep is True
+
+
+async def test_head_404_then_a_get_redirect_is_followed():
+    url = f"{HOST}/old"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "HEAD":
+            return httpx.Response(404)
+        if request.url.path == "/old":
+            return httpx.Response(301, headers={"location": "/new"})
+        return httpx.Response(200)
+
+    result = (await run(handler, [url]))[url]
+    assert result.status is LinkStatus.OK
+    assert result.final_url == f"{HOST}/new"
+
+
+@pytest.mark.parametrize("code", [200, 204])
+async def test_a_head_that_gives_a_clear_answer_does_not_trigger_a_get(code):
+    seen: list = []
+    url = f"{HOST}/page"
+    await run(head_then_get(code, 500, seen), [url])
+    assert [m for m, _ in seen] == ["HEAD"]
+
+
+async def test_a_redirect_from_head_is_followed_with_head_only():
+    seen: list = []
+    url = f"{HOST}/page"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method)
+        if request.url.path == "/page":
+            return httpx.Response(301, headers={"location": "/there"})
+        return httpx.Response(200)
+
+    result = (await run(handler, [url]))[url]
+    assert result.status is LinkStatus.OK
+    assert seen == ["HEAD", "HEAD"]
 
 
 # ── Redirects ──────────────────────────────────────────────────────────────

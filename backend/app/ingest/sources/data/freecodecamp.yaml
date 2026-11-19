@@ -1,0 +1,189 @@
+# Link-only source: freeCodeCamp (Phase 7, task 12)
+#
+# freeCodeCamp is a free, non-profit learning site with a course curriculum, a large
+# library of articles, and a YouTube channel of long video courses. The vetting log
+# (docs/mcp/vetting-log.md) approves it for LINKS only: its articles belong to their
+# authors, so we copy nothing. Each entry is a link, a title, and one plain sentence
+# that we wrote ourselves.
+#
+# Three kinds of link, each with its own content type:
+#   course  the hands-on curriculum at /learn (a learner works through it in the browser)
+#   video   freeCodeCamp's YouTube channel and playlists
+#   article topic pages of the freeCodeCamp news site, each a list of articles on one skill
+#
+# Choosing an address:
+#   - Use the top page of a course, a channel or a topic, never a single article or video.
+#     Those move or are replaced, and the link check cannot tell that a page has changed.
+#   - Write the address the way `normalise_url()` would: https, no trailing slash
+#     (except a site root), no tracking parameters.
+#
+# Not tested on the live web yet. The curriculum addresses under /learn are the most
+# likely to change, because freeCodeCamp renames and reorders its certifications from
+# time to time. Run the link check (python -m app.ingest.run --source freecodecamp
+# --dry-run) from a machine with internet access. A page that answers 404 or 410 is
+# dropped and listed in the report, and a replacement address can then be added here.
+# YouTube may ask for consent or block bots (403, 429, a redirect): the check cannot tell
+# that apart from a working page, so such links are kept.
+
+source_id: freecodecamp
+site: https://www.freecodecamp.org
+licence: proprietary
+attribution: "freeCodeCamp. Link only: no content is copied."
+content_type: course
+
+entries:
+  # ── Courses ────────────────────────────────────────────────────────────
+  - url: https://www.freecodecamp.org/learn
+    title: "freeCodeCamp: Curriculum"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "The starting page of freeCodeCamp's free curriculum, with courses from first web page to databases, data analysis and security."
+  - url: https://www.freecodecamp.org/learn/responsive-web-design
+    title: "freeCodeCamp: Responsive Web Design"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "A hands-on course in HTML and CSS where you build web pages that work on screens of any size."
+  - url: https://www.freecodecamp.org/learn/javascript-algorithms-and-data-structures-v8
+    title: "freeCodeCamp: JavaScript Algorithms and Data Structures"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "A hands-on course that teaches JavaScript through exercises, then uses it to practise algorithms and data structures."
+  - url: https://www.freecodecamp.org/learn/front-end-development-libraries
+    title: "freeCodeCamp: Front End Development Libraries"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "A hands-on course on building interfaces with popular front-end libraries such as React and Redux."
+  - url: https://www.freecodecamp.org/learn/back-end-development-and-apis
+    title: "freeCodeCamp: Back End Development and APIs"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "A hands-on course on building servers and APIs with Node.js, Express and a database."
+  - url: https://www.freecodecamp.org/learn/relational-database
+    title: "freeCodeCamp: Relational Database"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "A hands-on course on SQL, PostgreSQL, Bash and Git, building database-backed projects in a terminal."
+  - url: https://www.freecodecamp.org/learn/scientific-computing-with-python
+    title: "freeCodeCamp: Scientific Computing with Python"
+    domain: software-engineering
+    role_family: technical
+    level: entry
+    summary: "A hands-on course that teaches Python fundamentals through programming projects."
+  - url: https://www.freecodecamp.org/learn/data-analysis-with-python
+    title: "freeCodeCamp: Data Analysis with Python"
+    domain: data
+    role_family: technical
+    level: mid
+    summary: "A hands-on course on analysing and visualising data in Python with NumPy, pandas and Matplotlib."
+  - url: https://www.freecodecamp.org/learn/machine-learning-with-python
+    title: "freeCodeCamp: Machine Learning with Python"
+    domain: data
+    role_family: technical
+    level: mid
+    summary: "A hands-on course on the basics of machine learning in Python, from neural networks to model evaluation."
+  - url: https://www.freecodecamp.org/learn/information-security
+    title: "freeCodeCamp: Information Security"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "A hands-on course on securing web applications and the common ways they are attacked."
+  - url: https://www.freecodecamp.org/learn/quality-assurance
+    title: "freeCodeCamp: Quality Assurance"
+    domain: software-engineering
+    role_family: technical
+    level: mid
+    summary: "A hands-on course on testing software with automated tests, from unit tests to browser tests."
+
+  # ── Video courses ──────────────────────────────────────────────────────
+  - url: https://www.youtube.com/@freecodecamp
+    title: "freeCodeCamp on YouTube"
+    content_type: video
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "freeCodeCamp's video channel, with many hours-long free courses on programming, data and computer science."
+  - url: https://www.youtube.com/@freecodecamp/playlists
+    title: "freeCodeCamp on YouTube: Playlists"
+    content_type: video
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "The channel's playlists, which group its video courses by topic so you can follow one skill from start to finish."
+
+  # ── Articles by topic ──────────────────────────────────────────────────
+  - url: https://www.freecodecamp.org/news/tag/python
+    title: "freeCodeCamp News: Python"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about Python."
+  - url: https://www.freecodecamp.org/news/tag/javascript
+    title: "freeCodeCamp News: JavaScript"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about JavaScript."
+  - url: https://www.freecodecamp.org/news/tag/typescript
+    title: "freeCodeCamp News: TypeScript"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about TypeScript."
+  - url: https://www.freecodecamp.org/news/tag/react
+    title: "freeCodeCamp News: React"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about React."
+  - url: https://www.freecodecamp.org/news/tag/sql
+    title: "freeCodeCamp News: SQL"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about SQL and databases."
+  - url: https://www.freecodecamp.org/news/tag/git
+    title: "freeCodeCamp News: Git"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about Git and version control."
+  - url: https://www.freecodecamp.org/news/tag/docker
+    title: "freeCodeCamp News: Docker"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about Docker and containers."
+  - url: https://www.freecodecamp.org/news/tag/devops
+    title: "freeCodeCamp News: DevOps"
+    content_type: article
+    domain: software-engineering
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about DevOps and deploying software."
+  - url: https://www.freecodecamp.org/news/tag/data-science
+    title: "freeCodeCamp News: Data science"
+    content_type: article
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about data science."
+  - url: https://www.freecodecamp.org/news/tag/machine-learning
+    title: "freeCodeCamp News: Machine learning"
+    content_type: article
+    domain: data
+    role_family: technical
+    level: all
+    summary: "A topic page that lists freeCodeCamp's tutorials and guides about machine learning."

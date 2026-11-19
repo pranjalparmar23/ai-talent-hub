@@ -8,8 +8,10 @@ What it does for each address:
   1. Check it with the gateway's URL guard (app/mcp/security.py): http(s) only, no
      credentials, the host must be one of the hosts in the list being checked, and
      every IP it resolves to must be public.
-  2. Send a HEAD request. Some sites refuse HEAD (400, 403, 405, 501), so then it sends
-     a GET for the first byte only and reads nothing else.
+  2. Send a HEAD request. Some sites refuse HEAD (400, 403, 405, 501), and some answer
+     it with 404 even though the page is there (support.google.com does). So when HEAD
+     does not give a 2xx or a redirect, it sends a GET for the first byte only, reads
+     nothing else, and the GET answer is the one that counts.
   3. Follow up to 3 redirects by hand. Each step goes through the same URL guard, so a
      redirect cannot lead to a private address or to a site that is not in the list.
 
@@ -18,7 +20,7 @@ What the answer means:
   | Result  | When                                            | What ingest does |
   |---------|-------------------------------------------------|------------------|
   | ok      | the final answer is 2xx                         | keeps the link   |
-  | broken  | the final answer is 404 or 410                  | drops the link   |
+  | broken  | the final answer is 404 or 410 (HEAD and GET)   | drops the link   |
   | unknown | anything else: timeout, 403, 429, 5xx, a        | keeps the link   |
   |         | redirect to another site, no network, ...       |                  |
 
@@ -67,7 +69,10 @@ DEFAULT_HOST_DELAY = 0.25  # seconds between two requests to the same host
 
 _REDIRECTS = {301, 302, 303, 307, 308}
 _GONE = {404, 410}
-_HEAD_REFUSED = {400, 403, 405, 501}  # try a one-byte GET before giving up
+# When HEAD says one of these, ask again with a one-byte GET before believing it. A
+# 404 or 410 from HEAD alone is not enough to drop a link: some sites do not serve HEAD.
+_HEAD_REFUSED = {400, 403, 405, 501}
+_HEAD_UNSURE = _HEAD_REFUSED | _GONE
 
 
 class LinkStatus(str, Enum):
@@ -222,9 +227,10 @@ async def _probe(
 
 async def _ask(client: httpx.AsyncClient, url: str) -> tuple[int, str]:
     """One request. Returns (status code, Location header). HEAD first, then a
-    one-byte GET if the site refuses HEAD. The body is never read."""
+    one-byte GET if HEAD was refused or said the page is gone. The body is never read.
+    """
     response = await client.head(url)
-    if response.status_code in _HEAD_REFUSED:
+    if response.status_code in _HEAD_UNSURE:
         async with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as got:
             return got.status_code, got.headers.get("location", "")
     return response.status_code, response.headers.get("location", "")
