@@ -39,6 +39,9 @@ class ServerConfig:
     timeout_seconds: float = 10.0
     max_retries: int = 2
     rate_limit_per_minute: int = 30
+    # False = results from this server are never kept: no cache and no stale copy.
+    # For sources whose terms do not allow keeping their output (for example Brave).
+    cache: bool = True
     cache_ttl_seconds: int = 3600
     stale_ttl_seconds: int = 86400
     max_result_chars: int = 20000
@@ -53,6 +56,18 @@ def _require(raw: dict, key: str, name: str):
     if key not in raw or raw[key] in (None, "", []):
         raise RegistryError(f"server '{name}': '{key}' is required")
     return raw[key]
+
+
+def _parse_cache_flag(name: str, raw: dict) -> bool:
+    """`cache` must be a real true/false. A quoted "false" would be read as true,
+    and a server that must not be cached would quietly be cached."""
+    value = raw.get("cache", True)
+    if not isinstance(value, bool):
+        raise RegistryError(
+            f"server '{name}': cache must be true or false (without quotes), "
+            f"got {value!r}"
+        )
+    return value
 
 
 def _parse_server(name: str, raw: dict, environ: Mapping[str, str]) -> ServerConfig:
@@ -112,6 +127,7 @@ def _parse_server(name: str, raw: dict, environ: Mapping[str, str]) -> ServerCon
         timeout_seconds=float(raw.get("timeout_seconds", 10)),
         max_retries=int(raw.get("max_retries", 2)),
         rate_limit_per_minute=int(raw.get("rate_limit_per_minute", 30)),
+        cache=_parse_cache_flag(name, raw),
         cache_ttl_seconds=int(raw.get("cache_ttl_seconds", 3600)),
         stale_ttl_seconds=int(raw.get("stale_ttl_seconds", 86400)),
         max_result_chars=int(raw.get("max_result_chars", 20000)),
