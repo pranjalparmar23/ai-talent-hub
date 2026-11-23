@@ -2,8 +2,8 @@
 
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, what happens when it finds nothing, and how the interview and learning-plan agents use all of that.
 
-**Tracker:** Phase 7, tasks 2 to 12. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering). A real ingest of them is still to do.
+**Tracker:** Phase 7, tasks 2 to 13. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering) and were ingested for real on 2026-11-23 (44 and 23 chunks, so `learning_knowledge` holds 127). The golden evaluation set is built and has had its first runs (task 13, Decision 10). Its baseline is not saved yet, and no retrieval or ranking setting has been changed because of it.
 
 ---
 
@@ -22,6 +22,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 9 | What happens when nothing is found | `retrieve_with_fallback()`: the answer comes from the model's own knowledge, is labelled as such, and shows no sources. No web search and no outside service. Details in Decision 7 below. Decided 2026-11-19 |
 | 10 | How the agents use it | Both agents call `retrieve_with_fallback()` in a worker thread, put the text into the prompt as untrusted data, and return `sources` and `notice`. A link in a learning plan must come from a retrieved page. Details in Decision 8 below |
 | 11 | How learning links are kept healthy and ranked | Link lists are checked for dead pages on every ingest (404 and 410 are dropped, anything unclear is kept). The roadmap agent ranks resources by similarity, nudged by source trust and freshness. Details in Decision 9 below |
+| 12 | How we know a change made things worse | A golden evaluation set of hand-checked cases (37 for retrieval, 26 for learning plans), run on demand against the real system and compared with a saved baseline. Tune on the `dev` cases and confirm on `test`. Details in Decision 10 below |
 
 ---
 
@@ -500,6 +501,10 @@ All 108 links answered in the end. The first run found two problems, both fixed:
 1. `support.google.com/analytics` looked broken, because the server answers `HEAD` with 404. The checker now confirms a 404 or 410 with a `GET`.
 2. `docs.claude.com` redirects to `platform.claude.com`. The checker rightly did not follow a redirect to another host and kept the link as `unknown`. The address in the list was updated, and the report now says where a link was redirected to.
 
+### First real ingest (2026-11-23)
+
+`official-docs` added 44 chunks and `freecodecamp` added 23. With the 41 roadmap.sh chunks and 19 chunks from the handbook's "Coding interview study plan" (content type `roadmap`, role family technical), `learning_knowledge` now holds 127 chunks. `interview_knowledge` holds 829.
+
 ### Ranking
 
 Before the cap of 12, the roadmap agent ranks every retrieved chunk:
@@ -513,7 +518,7 @@ rank = similarity x (0.6 + 0.3 x trust + 0.1 x freshness)
 - Similarity stays the main term, so trust and freshness only separate near ties. An official page beats a list match that is about 0.04 better, never a clearly better one. Nothing changes in the stored data.
 - **Coverage.** Every skill gap with a match keeps its best chunk before any skill gets a second one. Up to 12 skills are searched (the old loop stopped after 12 chunks, so later skills were never searched). The prompt still shows the real similarity.
 
-The weights and trust values are starting values. Task 13 tunes them against the golden set.
+The weights and trust values are starting values. Task 13 tunes them against the golden set. The first runs found one weak spot (Docker, see Decision 10). Nothing has been changed yet.
 
 ### What it does not do
 
@@ -522,6 +527,88 @@ The weights and trust values are starting values. Task 13 tunes them against the
 - The check is run by hand for now. Running it on a schedule is a later CI task.
 - Non-technical roles are thin: official documentation covers them poorly (4 of the 44 links are for non-technical roles and 2 for all roles). Phase 9 needs more sources for them.
 - The trust values are a judgement. The list includes cloud vendors and Anthropic's own prompt guide, so it is not vendor-neutral.
+
+---
+
+## Decision 10: the golden evaluation set (task 13)
+
+Code: `backend/evals/`. Data and a README for each set: `backend/evals/datasets/knowledge/` and `backend/evals/datasets/roadmap/`. Tests: `backend/tests/unit/evals/`.
+
+A change to the cutoff, the ranking weights, a prompt, the model or a source can make answers worse without any test failing. The evaluation set is a small list of hand-checked cases that we run against the real system after such a change, and compare with a saved baseline. It follows the golden-set rules in the `eval-golden-set` skill.
+
+| Set | File | Cases | The question it answers |
+|---|---|---|---|
+| Retrieval | `retrieval.v1.jsonl` | 37 (28 dev, 9 test) | Does search still find the right pages in `interview_knowledge` and `learning_knowledge`, and still return nothing when nothing fits? |
+| Learning plan | `links.v1.jsonl` | 26 (19 dev, 7 test) | Does the plan link only to pages we retrieved, show its sources (or the "not based on reviewed sources" notice), rank the most trusted page first, and ignore instructions hidden in its input? |
+
+### The cases
+
+- One JSON object per line: `id`, `area`, `tags`, `split`, `input`, `expected`, `notes` (why the case exists), `source`, `added`, and `pair_with` for fairness pairs. `evals/cases.py` checks every file. An unknown key or a repeated id is an error, so a typo cannot quietly switch a check off.
+- `input` is what the code under test receives: a query and a collection for retrieval, skill gaps and a target role for the plan.
+- `expected` never holds a chunk id (ids change when the knowledge base is rebuilt) and never holds plan text (it differs on every run). Retrieval cases name keywords, a source id or a domain that a relevant page has, or say that nothing should come back. Plan cases name properties: how many links, which hosts, which page ranks first, which words must not appear.
+- Every case has exactly one of the tags `technical` or `non-technical`, plus slice tags: `clear`, `borderline`, `messy`, `empty-input`, `no-match`, `regression`, `safety`, `fairness`, `interview`, `learning`, `ranking`, `coverage`, `fallback`.
+- Fairness pairs are two cases that differ only in wording or letter case. They must name each other and sit in the same split. Safety cases hide instruction-like text in the input and name a canary word that must not appear in the plan.
+- Cases hold invented people and roles only, and no text copied from a site.
+- **All cases are `model-draft`**: Claude wrote them. They do not count until a person has checked the expected values and changed `source` to `reviewed-draft`. `python -m evals.cases --require-reviewed` fails while any draft is left.
+
+### Splits
+
+Each case is `dev` or `test` (about a quarter are `test`), fixed in the file. Tune on `dev`. Look at `test` only to confirm one chosen setting, once. The runners print a warning when a sweep is not on `dev`.
+
+### What is measured
+
+| Set | Measures |
+|---|---|
+| Retrieval | Precision (relevant results divided by results returned, so a cutoff that returns fewer chunks is not punished for it), hit rate, MRR, and how many "expect nothing" cases returned nothing |
+| Learning plan | Pass or fail per check. Four checks run on every case: the model answered (not the fallback plan), no link was invented, every source has a link in the plan, and a plan never has both sources and a notice. Cases add checks for grounding, link count, link hosts, the best-ranked page and canary words |
+
+Every report is given for all cases, each split and each tag, so a weak slice (non-technical roles, say) cannot hide in an average.
+
+### Running it
+
+The runners use the real ChromaDB and embedding model, and for plans the real Groq model. Nothing is faked, so they are not part of `pytest tests/unit`. From `backend/`:
+
+```
+python -m evals.cases                          # check the data files
+python -m evals.run_retrieval --split dev
+python -m evals.run_roadmap --split dev        # about 6 to 12 minutes, one model call per case
+python -m evals.run_roadmap --repeat 3         # the model is not deterministic
+```
+
+A failing case is a finding, not an error, so the exit code stays 0. The exit code is 1 for a bad dataset or bad options, and 2 when a run could not be done (ChromaDB down, a search that raised). A search that failed is left out of the scores and listed, because counting it would make an "expect nothing" case pass for the wrong reason.
+
+### Trying other settings
+
+Options change one run only. Nothing is written to the app.
+
+- Retrieval: `--min-similarity`, `--mmr-lambda`, `--max-per-doc`, and `--sweep NAME=v1,v2,...` for one row per value.
+- Plans: `--ranking-only` runs only retrieval and ranking, calls no model, and checks only the cases that name a best page. It is fast, free and gives the same answer every time. With it, `--base-weight`, `--trust-weight`, `--fresh-weight`, `--source-trust SOURCE=VALUE` and `--sweep` try other ranking values.
+
+When a value looks better on `dev`, run `test` once with it. Only then change the default in `app/rag/retriever.py` or `app/agents/candidate/roadmap_agent.py`, and record why here.
+
+### Results, baseline and tolerance
+
+- `--save` writes the run to `data/eval/results/<area>_v<N>_<time>.json`. `--compare FILE` prints which metrics moved, which cases started failing or passing, and which settings differ between the two runs, so a change in a number can be traced.
+- The first reviewed run is copied beside its dataset as `retrieval.v1.baseline.json` or `links.v1.baseline.json`, and `v1` is then frozen. A frozen version is never edited. A change is a `v2` file with a line in the set's changelog. A label is never changed just to turn a run green.
+- **No baseline is saved and no tolerance is agreed yet.** A tolerance (for example "no metric drops more than N points") comes from what the system really does, so it is set after the baseline.
+
+### LangSmith
+
+`backend/evals/langsmith_upload.py` copies a set to a LangSmith dataset (`ai-talent-hub-<area>-v<N>`), matching examples by case id. It does nothing unless `LANGSMITH_API_KEY` is set, never deletes, and `--dry-run` shows what it would send with no network. The files in the repository stay the source of truth. Phase 10 decides the final place for evaluation data.
+
+### First runs (2026-11-23, `dev` split, no setting changed)
+
+- **Retrieval:** 26 of 28 cases found a relevant page. Precision 0.61, hit rate 0.96, MRR 0.93. A sweep of the cutoff showed precision rising to 0.83 at 0.45 with hit rate and MRR unchanged. A cutoff near 0.40 looks safe, because it keeps a margin below the weakest best result. This is a candidate to confirm on `test`, not a change.
+- **Learning plan (first 15 cases):** 9 of 11 `dev` cases passed. Both failures are the Docker pair (`rdm-003`, `rdm-015`): a freeCodeCamp topic page ranked above the official Get started page by a small margin. A higher trust weight or a lower freeCodeCamp trust fixes it. Eleven more ranking cases (including counter-cases where a community roadmap should win) were added before any weight is changed, so the choice does not rest on three scenarios.
+- **Gaps seen:** the query `k8s` does not find Kubernetes pages (`ret-034`), and the handbook's study-plan page can appear in searches for non-technical skills, because the agents have no role filter.
+
+### What it does not do
+
+- It does not judge how good the plan's text is. It checks properties: links, sources, order, canary words.
+- It is small. A slice of two to five cases is a signal to look at, not a statistic.
+- There are no cases for the interview agent's questions yet. The retrieval cases cover its collection.
+- It does not run in CI. It needs ChromaDB and a Groq key, so it runs on demand.
+- The old Phase 2 set (`data/eval/retrieval_eval.json`, run by `backend/scripts/eval_retrieval.py`) targets the old `learning_resources` collection. It stays until task 15 removes the old retrieval code.
 
 ---
 
@@ -536,7 +623,8 @@ The weights and trust values are starting values. Task 13 tunes them against the
 | 10 | **Built.** `retrieve_with_fallback()` (Decision 7). The original live web lookup was dropped on 2026-11-19 |
 | 11 | **Built.** The interview and roadmap agents call `retrieve_with_fallback()` and return `sources` built from the citations, plus `notice` (Decision 8). The prompt note goes into the prompt on the general route. A learning plan can only link to retrieved pages |
 | 12 | **Built.** Three link-only lists (108 links), a link-health check on every link ingest, and ranking by trust and freshness (Decision 9). The credit is shown by task 16 |
-| 13, 14 | The evaluation set and tests cover the filters, idempotency, the licence gate and the fallback (including that a general-knowledge answer carries no invented sources) |
+| 13 | **Built, baseline pending.** Two golden sets (63 cases), runners with comparison and settings sweeps, an optional LangSmith upload, and 345 unit tests (Decision 10). The cases are drafts to be checked, and v1 is not frozen yet |
+| 14 | Integration tests cover the filters, idempotency, the licence gate and the fallback (including that a general-knowledge answer carries no invented sources), and run the agents against the real ChromaDB |
 
 ---
 
@@ -554,20 +642,23 @@ The weights and trust values are starting values. Task 13 tunes them against the
 - **Share-alike licences** (CC-BY-SA) are refused for full text. Someone must decide whether we can accept them and what that means for our own content. To allow them, move their names from `NEEDS_DECISION` to `ALLOWED_FULL_TEXT` in `licence.py`.
 - The GitHub MCP server was confirmed on a real run on 2026-11-19 (image tag, `stdio` subcommand, response shape, folder listing). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
-- The retrieval defaults (cutoff 0.30, variety 0.7, 2 chunks per page) are starting values. Task 13 tunes them against the golden set.
+- The retrieval defaults (cutoff 0.30, variety 0.7, 2 chunks per page) are starting values. The first `dev` run suggests a cutoff near 0.40 (Decision 10). Confirm it on the `test` split before changing `app/rag/retriever.py`.
 - **Live help for gaps (not planned).** Two ideas stay possible if the golden set shows the general-knowledge answers are too weak: a short list of trusted sites fetched live (our own topic-to-page table, nothing stored), or a test of Groq's `browser_search` for its cost, output format and storage rules. Each needs vetting first, and neither is scheduled.
 - The wording of the two fallback notes is a first version. Revisit it in task 16, when the screen shows the notice.
 - **No role filter in the agents (known limit).** See Decision 8. Non-technical roles may get weak software chunks until Phase 9 adds a role-to-family mapping. Task 13 measures it.
 - **The interview prompt still says "Reference material from real interviews".** The knowledge base holds preparation guides, not real interviews, so the wording is a little off. Fix it when the prompt is next touched.
 - **The frontend still reads the old resource `source` key.** `AnalysisView.tsx` uses it only as a tooltip. Task 16 updates it and shows `sources` and `notice`.
 - **The context budgets are starting values.** 12 resources and 500 characters per chunk for the roadmap; 3000 characters and 700 per chunk for the interview. Task 13 can tune them.
-- **The agents have not run against the real ChromaDB.** Their unit tests use a stand-in retriever. Task 14 runs them against the real client with the learning chunks (60 before the new lists are ingested) and the 829 interview chunks.
-- **The two new lists are not ingested yet.** They passed a real link check, but the real ingest (`--source official-docs`, then `--source freecodecamp`) is still to run.
+- **The agents have not run against the real ChromaDB.** Their unit tests use a stand-in retriever. Task 14 runs them against the real client with the 127 learning chunks and the 829 interview chunks.
 - **The link check is manual.** Run `python -m app.ingest.run --source <name> --dry-run` after any list change. A scheduled run belongs with CI.
 - **The `github` token is not set on the development machine.** The handbook cannot be re-ingested until `GITHUB_PERSONAL_ACCESS_TOKEN` is in `backend/.env`. It is to be set before the last task of Phase 7. Until then, run the link sources one at a time, not with `--source all`.
 - **Links inside the handbook's text are not checked.** Only the link-only lists get the check.
 - **freeCodeCamp's terms, its YouTube channel's terms and the licence of its news articles are unread.** This has no effect while we only link (vetting log).
-- **Ranking weights and trust values are starting values.** Task 13 tunes them. Non-technical roles are thin in the official-documentation list until Phase 9.
+- **Ranking weights and trust values are starting values.** The first run found the Docker case (Decision 10). Tune on the `dev` ranking cases with `--ranking-only`, confirm on `test`, then change `roadmap_agent.py`. Non-technical roles are thin in the official-documentation list until Phase 9.
+- **The evaluation set has no saved baseline yet.** A person must check the `model-draft` labels (`--require-reviewed`), then `v1` is frozen and `retrieval.v1.baseline.json` and `links.v1.baseline.json` are saved beside the data. Then a tolerance is agreed.
+- **Short names are not understood.** The query `k8s` finds no Kubernetes page (`ret-034`). A small alias list (k8s to Kubernetes, and similar) could fix it. Decide after the baseline.
+- **The handbook's study-plan page can appear for non-technical skills.** It is tagged for technical roles, and the agents do not filter on role family. This is the same gap as the missing role filter above.
+- **The LangSmith upload has not run for real.** It is tested with a fake client only. Run `python -m evals.langsmith_upload --dry-run` first, and upload only if you want the cases in LangSmith.
 
 ## Changelog
 
@@ -581,3 +672,4 @@ The weights and trust values are starting values. Task 13 tunes them against the
 | 2026-11-19 | Added Decision 7: the fallback when nothing is found (task 10). The live web lookup was dropped, so no search provider is used. Fixed the wording on result order in Decision 6 and updated the open items |
 | 2026-11-19 | Added Decision 8: how the agents use the knowledge layer (task 11). The interview and roadmap agents now read the new collections through `retrieve_with_fallback()` and return `sources` and `notice`. Marked task 11 built, updated the status and the task table, and added five open items and one finding |
 | 2026-11-19 | Added Decision 9: learning links, link health and ranking (task 12). Two link lists added, the link check built and run for real (108 of 108 links answering), and resources ranked by trust and freshness. Updated the status, the adapter table, the ingest options and the open items |
+| 2026-11-23 | Added Decision 10: the golden evaluation set (task 13). Two sets (37 retrieval and 26 learning-plan cases), runners with saved runs and comparison, settings sweeps, an optional LangSmith upload, and unit tests. Recorded the real ingest of the two new link lists (`learning_knowledge` now 127 chunks) and the first `dev` runs. Updated the status, the task table and the open items |
