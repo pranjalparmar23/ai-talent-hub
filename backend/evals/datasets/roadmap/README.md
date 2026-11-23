@@ -80,7 +80,18 @@ python -m evals.run_roadmap --save                # also write the scores to a f
 python -m evals.run_roadmap --compare links.v1.baseline.json
 ```
 
-Needs the learning collection filled first, and `GROQ_API_KEY` in `backend/.env`. A run makes one model call per case (none for the empty-plan case), so the whole set is about 15 calls. The plan comes from a model with a little randomness (temperature 0.3). One failure on a single run can be chance, so for a result that matters use `--repeat` and look at the pass rate. The ranking check does not use the model, so it gives the same answer every time.
+Trying other ranking settings, with no model calls (fast, free and the same answer every time):
+
+```
+python -m evals.run_roadmap --ranking-only --split dev --verbose
+python -m evals.run_roadmap --ranking-only --split dev --sweep trust_weight=0.3,0.4,0.5
+python -m evals.run_roadmap --ranking-only --split dev --sweep trust.freecodecamp=0.8,0.7,0.6
+python -m evals.run_roadmap --ranking-only --split dev --source-trust freecodecamp=0.7
+```
+
+`--ranking-only` checks only the cases that name a best page. Its overrides change that run only, and nothing is saved to the app. Tune on `dev`, confirm once on `test`, then change the value in `app/agents/candidate/roadmap_agent.py`.
+
+Needs the learning collection filled first, and `GROQ_API_KEY` in `backend/.env`. A normal run makes one model call per case (none for the empty-plan case), so the whole set is about 26 calls and takes 6 to 12 minutes. The runner prints one line per case as it goes. The plan comes from a model with a little randomness (temperature 0.3). One failure on a single run can be chance, so for a result that matters use `--repeat` and look at the pass rate. The ranking check does not use the model, so it gives the same answer every time.
 
 ## Baseline and tolerance
 
@@ -98,7 +109,8 @@ The steps are the same as for the retrieval set (`../knowledge/README.md`): run 
 ## Known weaknesses
 
 - `rdm-008` and `rdm-009` (sales, customer support): the learning links have no content for these yet, so the plan should carry the notice. The agent searches "learning resources for ...", which may pull in weak matches on other courses. If so, that is a real weakness of retrieval for non-technical skills. Phase 9 adds non-technical sources.
-- The ranking cases (`rdm-002` to `rdm-005`, `rdm-015`) depend on the starting weights (0.6 match, 0.3 trust, 0.1 freshness). A failure may mean the weights need tuning, or that the label is wrong. Check which, case by case.
+- The ranking cases (tag `ranking`) depend on the starting weights (0.6 match, 0.3 trust, 0.1 freshness). Two kinds are mixed on purpose. In most, the official page of a tool should come first (`rdm-002` to `rdm-005`, `rdm-015` to `rdm-021`, `rdm-026`). In the counter-cases (`rdm-022` to `rdm-025`) a community roadmap is the better match, and trust must not push a weaker official page above it. A weight that fixes one kind must not break the other. A failure may mean the weights need tuning, or that the label is wrong. Check which, case by case.
+- The first run found one scenario where the official page did not rank first: Docker (`rdm-003`, `rdm-015`), where a freeCodeCamp topic page ranked above the official Get started page.
 - The invented-link check in `rdm-014` cannot fail today, because the agent already drops links it did not retrieve. It exists to catch that code breaking. The case's other checks (reviewed links, a Kubernetes host) can still fail.
 
 ## Rules for changing this set
@@ -120,3 +132,4 @@ Phase 10 decides the final place for evaluation data and uploads these cases to 
 | Version | Date | Change |
 |---|---|---|
 | v1 | 2026-11-23 | First set: 15 cases (11 dev, 4 test). All `model-draft`; to be checked by a person before the baseline is frozen. |
+| v1 | 2026-11-23 | Before the baseline was saved and v1 was frozen: added `rdm-016` to `rdm-026` (11 single-skill ranking cases, 8 dev and 3 test), because the first runs had only three distinct ranking scenarios. Now 26 cases (19 dev, 7 test), all `model-draft`. |
