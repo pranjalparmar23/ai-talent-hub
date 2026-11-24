@@ -9,9 +9,8 @@ Topic, role and level are filters, so a new domain needs no new collection.
 
 The original five hand-filled collections (interview_experiences,
 learning_resources, company_interviews, dsa_notes, behavioral_questions) were
-removed in Phase 7 task 15. `scripts/remove_legacy_collections.py` deletes them
-from a ChromaDB that still has them. `scripts/export_chroma.py` makes a snapshot
-first.
+deleted in Phase 7 task 15. A ChromaDB that still has them can drop them by hand.
+`scripts/export_chroma.py` makes a snapshot first.
 
 See docs/architecture/knowledge-layer.md.
 """

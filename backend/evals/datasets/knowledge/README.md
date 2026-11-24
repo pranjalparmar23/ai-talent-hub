@@ -113,8 +113,7 @@ Steps (from the golden-set rules):
 ## Where it goes next
 
 - Phase 10 decides the final place for evaluation data and uploads these cases to a LangSmith dataset. The mapping is `input` to inputs, `expected` to reference outputs, `tags` and `source` to metadata. These files stay the source of truth.
-- The Phase 2 set (`data/eval/retrieval_eval.json`, run by `backend/scripts/eval_retrieval.py`) targets the old `learning_resources` collection. It stays where it is until task 15 removes the old retrieval code.
-- Task 15 deletes the old collections only after this set has been run and the baseline agreed.
+- The Phase 2 set (`data/eval/retrieval_eval.json`) and its runner targeted the old five collections. Task 15 removed both and deleted those collections (2026-11-24), after this set had been run. This set replaces it. The old files are in git history.
 
 ## Changelog
 

@@ -1,4 +1,4 @@
-# AI Talent Hub
+# AI Recruitment and Multi - Agent Interview Preparation Platform
 
 An AI platform that helps people get hired and helps companies hire.
 
@@ -93,6 +93,16 @@ Then run this once to set up the search database:
 docker compose -f docker/docker-compose.yml exec backend python scripts/init_chroma.py
 ```
 
+Then fill the knowledge base the AI reads (interview guides and learning links). The collections are empty until you do. This needs internet access, and the link lists check each page as they load:
+
+```bash
+docker compose -f docker/docker-compose.yml exec backend python -m app.ingest.run --source roadmap-sh
+docker compose -f docker/docker-compose.yml exec backend python -m app.ingest.run --source official-docs
+docker compose -f docker/docker-compose.yml exec backend python -m app.ingest.run --source freecodecamp
+```
+
+The interview guides (`--source tech-interview-handbook --enable-server github`) also need a read-only GitHub token in `backend/.env` as `GITHUB_PERSONAL_ACCESS_TOKEN`. Run it from a development machine. See `docs/architecture/knowledge-layer.md` for the details.
+
 ### 4. Start the frontend
 
 ```bash
@@ -150,7 +160,8 @@ ai-talent-hub/
 │   │   ├── database/        Database tables, data shapes, Postgres and Redis connections
 │   │   └── utils/           Small shared helpers
 │   ├── alembic/             Database migrations
-│   ├── scripts/             Setup and evaluation scripts
+│   ├── scripts/             Setup scripts (create the ChromaDB collections, export a snapshot)
+│   ├── evals/               Golden evaluation sets and the commands that run them
 │   ├── tests/               unit/ and integration/ tests
 │   ├── .env.example         Settings template (copy to .env)
 │   └── requirements.txt     Python packages
@@ -207,7 +218,7 @@ All documents are in the [`docs`](docs) folder.
 | 4 | Interview coach module | Done |
 | 5 | Recruiter flow | Done |
 | 6 | Skills and MCP foundation | Done |
-| 7 | Better knowledge for the AI, using outside sources | Planned |
+| 7 | Better knowledge for the AI, using outside sources | In progress |
 | 8 | Voice interviews | Planned |
 | 9 | Interviews and learning for all kinds of roles | Planned |
 | 10 | Testing the quality of AI answers | Planned |
