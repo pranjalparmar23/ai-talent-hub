@@ -31,11 +31,7 @@ export default function InterviewSetup() {
     setStarting(true)
     try {
       const { data } = await candidateAPI.startInterview(company.trim(), role.trim())
-      // The backend returns the sources of the opening question once, with the question.
-      // They go to the chat screen through the router, so they are not asked for again.
-      navigate(`/candidate/interview/${data.session_id}`, {
-        state: { sources: data.sources, notice: data.notice },
-      })
+      navigate(`/candidate/interview/${data.session_id}`)
     } catch (err: unknown) {
       toast.error(errorMessage(err, "Couldn't start the interview. Please try again."))
       setStarting(false)

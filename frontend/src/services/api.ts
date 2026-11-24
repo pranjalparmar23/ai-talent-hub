@@ -142,7 +142,7 @@ export interface InterviewStartResponse {
   question_number: number;
   max_questions: number;
   // Reviewed pages the opening question drew on. `notice` is set when it drew on none.
-  // The backend returns these once, with the first question, and does not save them.
+  // The backend also saves them, so the chat screen reads them from the session.
   sources: SourceItem[];
   notice: string | null;
 }
@@ -163,6 +163,10 @@ export interface InterviewSession {
   max_questions: number;
   session_complete: boolean;
   feedback_ready: boolean;
+  // What the opening question was based on, saved when the interview started.
+  // Empty (and no notice) for interviews created before these were saved.
+  sources: SourceItem[];
+  notice: string | null;
 }
 
 export interface InterviewFeedback {

@@ -6,7 +6,7 @@
 
 import type { SourceItem } from '../services/api'
 
-/** What the opening interview question was based on. Passed from the setup screen. */
+/** What the opening interview question was based on, as saved with the session. */
 export interface OpeningMaterial {
   sources: SourceItem[]
   notice: string | null
@@ -75,10 +75,11 @@ function asSource(value: unknown): SourceItem | null {
 }
 
 /**
- * The interview's opening material from the router's navigation state, or null.
+ * The interview's opening material from an API value, or null.
  *
- * The state is untrusted (anything can be put in the history), so it is checked and
- * rebuilt. Nothing is shown when there is neither a source nor a notice.
+ * The value is checked and rebuilt rather than trusted (an older backend, or a broken
+ * response, may send something else). Nothing is shown when there is neither a source
+ * nor a notice.
  */
 export function readOpening(state: unknown): OpeningMaterial | null {
   if (typeof state !== 'object' || state === null) return null

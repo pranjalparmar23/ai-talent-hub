@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { ArrowLeft, ArrowRight, Loader2, Send } from 'lucide-react'
 import { candidateAPI, type InterviewMessage } from '../services/api'
 import { errorMessage, errorStatus } from '../shared/errors'
 import { Notice, SourceList } from '../shared/Sources'
-import { readOpening } from '../shared/sourceHelpers'
+import { readOpening, type OpeningMaterial } from '../shared/sourceHelpers'
 
 const SERIF = { fontFamily: '"Instrument Serif", "Iowan Old Style", Georgia, serif' }
 
@@ -20,15 +20,12 @@ type Meta = {
 export default function InterviewChat() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
-
-  // What the opening question was based on. The setup screen passes it through the router
-  // because the backend does not save it. A refresh keeps the history state; a new tab or a
-  // pasted link has none, and then nothing is shown.
-  const opening = useMemo(() => readOpening(location.state), [location.state])
 
   const [messages, setMessages] = useState<InterviewMessage[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
+  // What the opening question was based on. The backend saves it with the session, so it
+  // is there after a refresh, in a new tab and from a pasted link. Old sessions have none.
+  const [opening, setOpening] = useState<OpeningMaterial | null>(null)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -40,6 +37,7 @@ export default function InterviewChat() {
     try {
       const { data } = await candidateAPI.getInterviewSession(sessionId)
       setMessages(data.messages)
+      setOpening(readOpening({ sources: data.sources, notice: data.notice }))
       setMeta({
         company: data.company,
         role: data.role,
