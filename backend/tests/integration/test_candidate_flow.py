@@ -1,26 +1,36 @@
-"""Integration test — full candidate pipeline against real Groq + ChromaDB.
+"""Integration tests: the candidate pipeline against real Groq, ChromaDB and embeddings.
 
-Unlike the unit tests, this hits the real world:
-  - Real Groq API calls (uses GROQ_API_KEY from env)
-  - Real ChromaDB HTTP client (learning_resources collection)
+Unlike the unit tests, these hit the real world:
+  - Real Groq API calls (GROQ_API_KEY from the environment)
+  - Real ChromaDB HTTP client (`interview_knowledge` and `learning_knowledge`)
   - Real embedding model (sentence-transformers)
 
-Purpose: catch integration bugs unit tests can't — prompt regressions, API
-signature changes, schema drift between agent output and downstream consumers.
+Purpose: catch what unit tests cannot: prompt regressions, API signature changes,
+schema drift between agent output and downstream consumers, and agents that cite
+pages that are not in the knowledge base.
 
-Run with:
-    pytest tests/integration/ -v -m integration
+The grounding tests read the real collections and never write to them. They skip
+when a collection is empty (run `python -m app.ingest.run` first). The model's wording
+varies, so they check invariants (every link and source is a stored page, sources and
+notice agree) and not exact text.
 
-Skipped by default in CI (see @pytest.mark.integration). Enable via:
-    pytest -v -m integration --run-integration
+Run from backend/, with ChromaDB up and the key exported:
+
+    pytest tests/integration/test_candidate_flow.py -m integration --no-cov
+
+Skipped by default (`pytest` alone does not run them) and skipped when GROQ_API_KEY
+is not set. The knowledge-layer tests that need no key are in test_knowledge_layer.py.
 """
 
 import os
 import pytest
 
+from app.agents.candidate.interview_agent import InterviewAgent
 from app.agents.candidate.resume_parser import ResumeParserAgent
+from app.agents.candidate.roadmap_agent import RoadmapAgent
 from app.agents.recruiter.jd_analyzer import JDAnalyzerAgent
 from app.graphs.candidate_graph import CandidateGraph
+from tests.integration._helpers import grounding_problems, plan_links
 
 
 # ── Skip guards ───────────────────────────────────────────────────────
@@ -242,7 +252,7 @@ class TestCandidateGraph:
         ), f"Expected PostgreSQL to match, matching_skills={result['matching_skills']}"
 
     @pytest.mark.asyncio
-    async def test_learning_plan_produces_valid_result(self):
+    async def test_learning_plan_produces_valid_result(self, real_learning_urls):
         """Full pipeline including RAG retrieval from ChromaDB."""
         resume = await ResumeParserAgent().parse(SAMPLE_RESUME)
         jd = await JDAnalyzerAgent().analyze(SAMPLE_JD)
@@ -269,14 +279,97 @@ class TestCandidateGraph:
             assert isinstance(week.get("tasks"), list)
             assert isinstance(week.get("resources"), list)
 
-        # RAG worked: at least one week references seeded resource
-        # (learning_resources collection has kubernetes.json, aws_cloud.json, etc.)
-        all_resources = [r for w in weeks for r in w.get("resources", [])]
-        # We can't strictly assert non-empty resources — RAG might return nothing —
-        # but we can log for visibility
-        print(
-            f"\nLearning plan referenced {len(all_resources)} resources across {len(weeks)} weeks"
+        # Grounding: every link is a stored page, every source is used by the plan,
+        # and a plan with no sources says so in its notice.
+        problems = grounding_problems(
+            result, real_learning_urls, links=plan_links(result)
         )
+        assert not problems, problems
 
         # No parse error on the plan itself
         assert not result.get("_parse_error")
+
+
+# ── Grounding against the real knowledge base ────────────────────────
+
+
+class TestRoadmapAgentGrounding:
+    """RoadmapAgent with real retrieval and real Groq."""
+
+    @pytest.mark.asyncio
+    async def test_known_skills_give_links_that_are_stored_pages(
+        self, real_learning_urls
+    ):
+        plan = await RoadmapAgent().generate(
+            ["Docker", "Kubernetes"], "DevOps Engineer"
+        )
+
+        assert not plan.get("_parse_error"), plan.get("_raw_output", "")
+        assert plan["weeks"], "a plan for two real skills should have weeks"
+        problems = grounding_problems(plan, real_learning_urls, links=plan_links(plan))
+        assert not problems, problems
+
+    @pytest.mark.asyncio
+    async def test_a_skill_the_knowledge_base_lacks_still_gives_an_honest_plan(
+        self, real_learning_urls
+    ):
+        """Whatever the retrieval finds, the plan must not invent a link.
+
+        Whether the nonsense skill matches anything depends on the model's scores, so
+        this checks the rules (no invented link, notice when there are no sources)
+        and not which of the two cases happened.
+        """
+        plan = await RoadmapAgent().generate(
+            ["Underwater basket weaving", "Medieval falconry"], "Basket Engineer"
+        )
+
+        problems = grounding_problems(
+            plan,
+            real_learning_urls,
+            links=plan_links(plan),
+            has_content=bool(plan.get("weeks")),
+        )
+        assert not problems, problems
+
+    @pytest.mark.asyncio
+    async def test_no_gaps_means_no_plan_and_no_retrieval_claims(self):
+        plan = await RoadmapAgent().generate([], "Backend Engineer")
+
+        assert plan["weeks"] == [] and plan["total_weeks"] == 0
+        assert not plan.get("sources")
+        assert not plan.get("notice")
+
+
+class TestInterviewAgentGrounding:
+    """InterviewAgent with real retrieval and real Groq."""
+
+    @pytest.mark.asyncio
+    async def test_the_opening_question_cites_only_stored_pages(
+        self, real_interview_urls
+    ):
+        result = await InterviewAgent().start_session(
+            company="Google", role="Software Engineer"
+        )
+
+        assert result["session_started"] is True
+        assert len(result["question"].strip()) > 20
+        problems = grounding_problems(
+            result, real_interview_urls, grounded=result["grounded"]
+        )
+        assert not problems, problems
+        for source in result["sources"]:
+            assert source["title"] and source["licence"] and source["attribution"]
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_company_and_role_still_gives_a_consistent_answer(
+        self, real_interview_urls
+    ):
+        result = await InterviewAgent().start_session(
+            company="Zzyzx Quantum Llama Works", role="Chief Llama Officer"
+        )
+
+        assert result["question"].strip()
+        problems = grounding_problems(
+            result, real_interview_urls, grounded=result["grounded"]
+        )
+        assert not problems, problems
