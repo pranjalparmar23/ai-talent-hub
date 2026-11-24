@@ -112,37 +112,6 @@ def ids(result):
     return [c.id for c in result.chunks]
 
 
-# ── the original retrieve() is unchanged ─────────────────────
-
-
-def test_retrieve_turns_distance_into_similarity(store):
-    store.rows = [row("a:0000", 0.8)]
-    (doc,) = RAGRetriever().retrieve("learning_resources", "docker basics")
-    assert doc.id == "a:0000"
-    assert doc.similarity == pytest.approx(0.8)
-    assert store.queries[0]["where"] is None
-    assert store.queries[0]["top_k"] == 5
-    assert store.queries[0]["include_embeddings"] is False
-
-
-def test_retrieve_with_an_empty_query_does_nothing(store):
-    assert RAGRetriever().retrieve("learning_resources", "   ") == []
-    assert store.queries == []
-    assert FakeEmbeddingService.texts == []
-
-
-def test_retrieve_passes_a_raw_where_filter_through(store):
-    RAGRetriever().retrieve("learning_resources", "q", where={"topic": "dsa"})
-    assert store.queries[0]["where"] == {"topic": "dsa"}
-
-
-def test_retrieve_across_collections_keeps_each_collection_apart(store):
-    store.rows = [row("a:0000", 0.9)]
-    found = RAGRetriever().retrieve_across_collections(["one", "two"], "q")
-    assert set(found) == {"one", "two"}
-    assert [q["collection_name"] for q in store.queries] == ["one", "two"]
-
-
 # ── build_where ──────────────────────────────────────────────
 
 
@@ -215,9 +184,10 @@ def test_the_filter_always_has_at_least_two_conditions():
 # ── search: bad filters fail loudly ──────────────────────────
 
 
-def test_search_refuses_a_legacy_collection(store):
-    with pytest.raises(ValueError, match="retrieve"):
-        RAGRetriever().search("q", "dsa_notes", now=NOW)
+@pytest.mark.parametrize("name", ["dsa_notes", "learning_resources", "nonsense"])
+def test_search_refuses_a_collection_that_is_not_a_knowledge_collection(store, name):
+    with pytest.raises(ValueError, match="search\\(\\) works on"):
+        RAGRetriever().search("q", name, now=NOW)
     assert store.queries == []
 
 

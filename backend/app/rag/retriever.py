@@ -1,14 +1,13 @@
 """RAGRetriever — the public API for semantic search over ChromaDB collections.
 
-Two ways to search:
+`RAGRetriever.search()` searches the two knowledge collections (Phase 7, task 9). It
+filters by domain, role family, level and content type, ignores expired chunks, drops
+weak matches, avoids near-duplicate results, and returns each chunk with its source,
+licence and credit line. Chunks are written by `app/ingest`, not by this module.
 
-- `retrieve()` is the original search. It works on any collection and returns text
-  and a similarity score. The interview and roadmap agents still use it until
-  task 11, and it is removed in task 15.
-- `search()` is retriever v2 (Phase 7, task 9). It searches the two knowledge
-  collections, filters by domain, role family, level and content type, ignores
-  expired chunks, drops weak matches, avoids near-duplicate results, and returns
-  each chunk with its source, licence and credit line.
+The original `retrieve()`, `retrieve_across_collections()` and `add_documents()`
+worked on any collection and recorded no source or licence. They were removed in
+task 15, together with the five collections they served.
 """
 
 import logging
@@ -27,7 +26,6 @@ from app.ingest.schema import (
     SCHEMA_VERSION,
     citation_from_metadata,
 )
-from app.rag.chunking import TextChunker
 from app.rag.embeddings import EmbeddingService
 from app.rag.ranking import mmr_select
 from app.rag.vector_store import VectorStore
@@ -45,18 +43,6 @@ DEFAULT_MMR_LAMBDA = 0.7  # 1.0 = only relevance, 0.0 = only variety
 DEFAULT_MAX_PER_DOC = 2  # most chunks one page may supply
 FETCH_FACTOR = 4  # candidates fetched = top_k x this ...
 MIN_FETCH = 20  # ... but never fewer than this
-
-
-@dataclass
-class RetrievedDocument:
-    id: str
-    document: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-    similarity: float = 0.0
-
-    def __repr__(self) -> str:
-        preview = self.document[:50].replace("\n", " ")
-        return f"<RetrievedDocument similarity={self.similarity:.3f} '{preview}...'>"
 
 
 @dataclass
@@ -161,8 +147,7 @@ def _check_filters(
     """Fail loudly on a typo, instead of quietly returning nothing."""
     if collection not in KNOWLEDGE_COLLECTIONS:
         raise ValueError(
-            f"search() works on {', '.join(KNOWLEDGE_COLLECTIONS)}, not '{collection}'. "
-            "Use retrieve() for the old collections."
+            f"search() works on {', '.join(KNOWLEDGE_COLLECTIONS)}, not '{collection}'"
         )
     if role_family and role_family not in ROLE_FAMILIES:
         raise ValueError(
@@ -190,70 +175,6 @@ def _doc_key(row: dict[str, Any]) -> str:
 
 
 class RAGRetriever:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
-        self.chunker = TextChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-
-    def add_documents(
-        self,
-        collection_name: str,
-        documents: list[str],
-        metadatas: list[dict] | None = None,
-    ) -> int:
-        if not documents:
-            return 0
-
-        chunks, chunk_metas = self.chunker.chunk_documents(documents, metadatas)
-        if not chunks:
-            return 0
-
-        embeddings = EmbeddingService.embed_batch(chunks)
-        VectorStore.add_documents(
-            collection_name=collection_name,
-            documents=chunks,
-            embeddings=embeddings,
-            metadatas=chunk_metas,
-        )
-        return len(chunks)
-
-    def retrieve(
-        self,
-        collection_name: str,
-        query: str,
-        top_k: int = 5,
-        where: dict | None = None,
-    ) -> list[RetrievedDocument]:
-        if not query or not query.strip():
-            return []
-
-        query_vector = EmbeddingService.embed_text(query)
-        raw_results = VectorStore.query(
-            collection_name=collection_name,
-            query_embedding=query_vector,
-            top_k=top_k,
-            where=where,
-        )
-
-        return [
-            RetrievedDocument(
-                id=r.get("id", ""),
-                document=r.get("document", ""),
-                metadata=r.get("metadata", {}) or {},
-                similarity=1.0 - r.get("distance", 1.0),
-            )
-            for r in raw_results
-        ]
-
-    def retrieve_across_collections(
-        self,
-        collection_names: list[str],
-        query: str,
-        top_k_per_collection: int = 5,
-    ) -> dict[str, list[RetrievedDocument]]:
-        return {
-            name: self.retrieve(name, query, top_k=top_k_per_collection)
-            for name in collection_names
-        }
-
     def search(
         self,
         query: str,
