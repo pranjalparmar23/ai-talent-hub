@@ -79,7 +79,7 @@ Hold out a **test split** (about 20–30% of cases) that is never used while tun
 
 ## Step 7 — Store and version it
 
-The Phase 2 retrieval set (`data/eval/retrieval_eval.json`: 20 keyword-based pairs, run by `backend/scripts/eval_retrieval.py`) is the first golden set; keep it where it is until Phase 10 decides.
+The Phase 2 retrieval set (20 keyword-based pairs) was the first golden set. Phase 7 task 15 removed it, because it targeted the five old collections. Its role is taken by `backend/evals/datasets/knowledge/retrieval.v1.jsonl` and `backend/evals/datasets/roadmap/links.v1.jsonl`.
 
 Proposed layout for new sets (confirm against Phase 10 before creating it, and follow Phase 10 if it has already decided otherwise):
 

@@ -1,12 +1,11 @@
 """ChromaDB vector store wrapper.
 
-Connects to the ChromaDB container and exposes a thin API for adding
-documents, querying, and managing collections.
+Connects to the ChromaDB container and exposes a thin API for writing
+chunks, querying, and managing collections.
 """
 
 import logging
 import os
-import uuid
 from typing import Optional
 
 import chromadb
@@ -52,37 +51,6 @@ class VectorStore:
         return cls.get_client().get_collection(name=name)
 
     @classmethod
-    def add_documents(
-        cls,
-        collection_name: str,
-        documents: list[str],
-        embeddings: list[list[float]],
-        metadatas: list[dict] | None = None,
-        ids: list[str] | None = None,
-    ) -> list[str]:
-        if len(documents) != len(embeddings):
-            raise ValueError(
-                f"Length mismatch: {len(documents)} documents vs {len(embeddings)} embeddings"
-            )
-        if metadatas is not None and len(metadatas) != len(documents):
-            raise ValueError(
-                f"Length mismatch: {len(documents)} documents vs {len(metadatas)} metadatas"
-            )
-
-        collection = cls._get_collection_by_name(collection_name)
-
-        if ids is None:
-            ids = [str(uuid.uuid4()) for _ in documents]
-
-        collection.add(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
-        return ids
-
-    @classmethod
     def upsert_documents(
         cls,
         collection_name: str,
@@ -93,8 +61,8 @@ class VectorStore:
     ) -> list[str]:
         """Insert chunks, or overwrite them when the id already exists.
 
-        Unlike add_documents, the ids are required: the ingest pipeline gives
-        every chunk a fixed id, so loading the same content twice changes nothing.
+        The ids are required: the ingest pipeline gives every chunk a fixed id, so
+        loading the same content twice changes nothing.
         """
         if not (len(documents) == len(embeddings) == len(metadatas) == len(ids)):
             raise ValueError(
@@ -215,9 +183,3 @@ class VectorStore:
     @classmethod
     def heartbeat(cls) -> int:
         return cls.get_client().heartbeat()
-
-
-# ── Compatibility shim for legacy imports ────────────────────
-def get_vector_store() -> type[VectorStore]:
-    """Legacy alias — returns the VectorStore class for backward compatibility."""
-    return VectorStore

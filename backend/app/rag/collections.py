@@ -3,13 +3,14 @@
 Single source of truth for which vector collections the platform uses.
 Adding a new RAG namespace? Add it here and run `python scripts/init_chroma.py`.
 
-Two generations live side by side during Phase 7:
+Two collections hold the knowledge the agents search. Both are filled by
+app/ingest, and every chunk carries its source, licence and expiry as metadata.
+Topic, role and level are filters, so a new domain needs no new collection.
 
-- KNOWLEDGE_COLLECTIONS: the new, licence-aware collections filled by
-  app/ingest. Every chunk carries source, licence and expiry metadata.
-- LEGACY_COLLECTIONS: the original five, filled by hand with no recorded
-  licence. They stay until Phase 7 task 15, which deletes them only after
-  the new evaluation set passes.
+The original five hand-filled collections (interview_experiences,
+learning_resources, company_interviews, dsa_notes, behavioral_questions) were
+deleted in Phase 7 task 15. A ChromaDB that still has them can drop them by hand.
+`scripts/export_chroma.py` makes a snapshot first.
 
 See docs/architecture/knowledge-layer.md.
 """
@@ -26,7 +27,6 @@ class CollectionSpec:
     distance_metric: str = "cosine"  # cosine | l2 | ip
 
 
-# ── New knowledge collections (Phase 7) ──────────────────────
 KNOWLEDGE_COLLECTIONS: list[CollectionSpec] = [
     CollectionSpec(
         name=INTERVIEW_COLLECTION,
@@ -44,33 +44,8 @@ KNOWLEDGE_COLLECTIONS: list[CollectionSpec] = [
     ),
 ]
 
-# ── Original five collections (removed in Phase 7 task 15) ───
-LEGACY_COLLECTIONS: list[CollectionSpec] = [
-    CollectionSpec(
-        name="interview_experiences",
-        description="Real interview experiences shared by candidates — questions asked, format, difficulty",
-    ),
-    CollectionSpec(
-        name="learning_resources",
-        description="Curated tutorials, courses, roadmaps, docs for skill development",
-    ),
-    CollectionSpec(
-        name="company_interviews",
-        description="Company-specific interview patterns — Amazon LP, Google system design, Meta behavioural",
-    ),
-    CollectionSpec(
-        name="dsa_notes",
-        description="Data structures & algorithms notes, patterns, problem explanations",
-    ),
-    CollectionSpec(
-        name="behavioral_questions",
-        description="STAR-method behavioural questions and example answers across role levels",
-    ),
-]
-
 # Everything that gets created by init_chroma.py and VectorStore.init_all_collections().
-COLLECTIONS: list[CollectionSpec] = KNOWLEDGE_COLLECTIONS + LEGACY_COLLECTIONS
+COLLECTIONS: list[CollectionSpec] = list(KNOWLEDGE_COLLECTIONS)
 
 COLLECTION_NAMES = [c.name for c in COLLECTIONS]
 KNOWLEDGE_COLLECTION_NAMES = [c.name for c in KNOWLEDGE_COLLECTIONS]
-LEGACY_COLLECTION_NAMES = [c.name for c in LEGACY_COLLECTIONS]

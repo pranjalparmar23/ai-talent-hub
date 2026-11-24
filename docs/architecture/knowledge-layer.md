@@ -2,8 +2,8 @@
 
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, what happens when it finds nothing, and how the interview and learning-plan agents use all of that.
 
-**Tracker:** Phase 7, tasks 2 to 13. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering) and were ingested for real on 2026-11-23 (44 and 23 chunks, so `learning_knowledge` holds 127). The golden evaluation set is built and has had its first runs (task 13, Decision 10). Its baseline is not saved yet, and no retrieval or ranking setting has been changed because of it.
+**Tracker:** Phase 7, tasks 2 to 15. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering) and were ingested for real on 2026-11-23 (44 and 23 chunks, so `learning_knowledge` holds 127). The golden evaluation set is built and has had its first runs (task 13, Decision 10). It was run against the real system on 2026-11-24. Two settings were changed because of it: the retrieval cutoff went from 0.30 to 0.40 and freeCodeCamp's trust from 0.8 to 0.7 (Decision 10). The results of that run are recorded as the starting scores. The labels are still unchecked drafts, so `v1` is not frozen. Integration tests now run the retriever, the pipeline and both agents against the real ChromaDB (task 14). The five old collections, the old `retrieve()` and the Phase 2 evaluation set were removed in task 15 (2026-11-24).
 
 ---
 
@@ -14,7 +14,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 1 | What one piece of knowledge looks like | A `KnowledgeDoc` record. Every chunk carries its source, licence and dates as flat metadata |
 | 2 | Collections | Two new collections, `interview_knowledge` and `learning_knowledge`, filtered by metadata. `skills_taxonomy` is reserved for Phase 9 |
 | 3 | Embedding model | **Keep `all-MiniLM-L6-v2` (English only).** Decided 2026-11-10 |
-| 4 | Old data | Not migrated. It stays in the local snapshot and is deleted in task 15 after the new evaluation passes |
+| 4 | Old data | Not migrated. The five old collections were deleted from ChromaDB in task 15 (2026-11-24), after the first evaluation run. Their text and metadata exist only in the local snapshot |
 | 5 | Licence policy | Allowlist of permissive licences for full text. Share-alike, unknown and restrictive licences are refused. Restrictive sources are link-only |
 | 6 | Where content comes from | One adapter per source. Tech Interview Handbook (full text), and three link-only lists: roadmap.sh, official documentation and freeCodeCamp (task 12) |
 | 7 | How content is loaded and kept fresh | One command (`python -m app.ingest.run`). Link-only lists are checked for dead pages first. After each run, chunks of that source that are past `expires_at` are removed |
@@ -22,13 +22,13 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 9 | What happens when nothing is found | `retrieve_with_fallback()`: the answer comes from the model's own knowledge, is labelled as such, and shows no sources. No web search and no outside service. Details in Decision 7 below. Decided 2026-11-19 |
 | 10 | How the agents use it | Both agents call `retrieve_with_fallback()` in a worker thread, put the text into the prompt as untrusted data, and return `sources` and `notice`. A link in a learning plan must come from a retrieved page. Details in Decision 8 below |
 | 11 | How learning links are kept healthy and ranked | Link lists are checked for dead pages on every ingest (404 and 410 are dropped, anything unclear is kept). The roadmap agent ranks resources by similarity, nudged by source trust and freshness. Details in Decision 9 below |
-| 12 | How we know a change made things worse | A golden evaluation set of hand-checked cases (37 for retrieval, 26 for learning plans), run on demand against the real system and compared with a saved baseline. Tune on the `dev` cases and confirm on `test`. Details in Decision 10 below |
+| 12 | How we know a change made things worse | A golden evaluation set of hand-checked cases (37 for retrieval, 26 for learning plans), run on demand against the real system and compared with a saved baseline. Tune on the `dev` cases and confirm on `test`. Details in Decision 10 below. First run recorded 2026-11-24 |
 
 ---
 
 ## Where we start
 
-Facts from the repo and the snapshot taken on 2026-11-10:
+Facts from the repo and the snapshot taken on 2026-11-10, before the rebuild. The five collections described here no longer exist (task 15):
 
 - Five fixed collections hold 119 chunks in total: `behavioral_questions` 14, `company_interviews` 23, `dsa_notes` 18, `interview_experiences` 36, `learning_resources` 28. Chunks average about 350 characters.
 - Metadata is free-form and differs per collection (`topic`, `category`, `company`, `difficulty`, `source_file` and so on). **None of it records where the text came from or what licence it has.** `source_file` names a file that is no longer in the repo.
@@ -91,7 +91,7 @@ Every document field except `text` and the ISO times, plus:
 
 ## Decision 2: collections (task 3)
 
-Five topic-based collections are replaced by two content-based ones. Topic, role and level become filters, so adding a new domain needs no new collection. The code is `app/rag/collections.py`; the old five stay listed there as legacy until task 15.
+Five topic-based collections are replaced by two content-based ones. Topic, role and level become filters, so adding a new domain needs no new collection. The code is `app/rag/collections.py`, which lists only the two new collections. The old five were removed from it, and from ChromaDB, in task 15.
 
 | Collection | Holds | `content_type` values |
 |---|---|---|
@@ -101,9 +101,9 @@ Five topic-based collections are replaced by two content-based ones. Topic, role
 
 Searches filter on `domain`, `role_family`, `level` and `content_type`, and always on `schema_version = 2`.
 
-**Why new names instead of reusing `learning_resources`:** the old agents kept working until they were rewired in task 11, and task 15 can delete the old five collections cleanly without any risk to the new ones. This differs from the example names in the tracker for that reason only.
+**Why new names instead of reusing `learning_resources`:** the old agents kept working until they were rewired in task 11, and task 15 could delete the old five collections cleanly without any risk to the new ones. This differs from the example names in the tracker for that reason only.
 
-**Old data:** the 119 old chunks have no recorded source or licence, so under the rule above they cannot be loaded into the new collections. They remain in the local snapshot and are deleted from ChromaDB in task 15, **only after** the new evaluation set passes.
+**Old data:** the 119 old chunks have no recorded source or licence, so under the rule above they cannot be loaded into the new collections. They were deleted from ChromaDB in task 15 (2026-11-24), after the first run of the evaluation set (Decision 10) showed the new collections working. A snapshot with their text and metadata is kept in `data/snapshots/pre-rag-rebuild-20261110T064200Z`. That folder is git-ignored, so it exists only on the machine that made it, and it holds no embeddings. Nothing restores it automatically.
 
 ---
 
@@ -155,7 +155,7 @@ Each document ends with one status:
 | `skipped` | No text to store |
 | `failed` | An error. The run goes on with the next document |
 
-A run is `ok` unless a document `failed`. The collections must exist first (`python scripts/init_chroma.py`). The pipeline uses four `VectorStore` methods added for it: `upsert_documents`, `get_by_where`, `update_metadatas` and `delete_ids`. The older methods are unchanged.
+A run is `ok` unless a document `failed`. The collections must exist first (`python scripts/init_chroma.py`). The pipeline uses four `VectorStore` methods added for it: `upsert_documents`, `get_by_where`, `update_metadatas` and `delete_ids`. The old `add_documents()`, which used random ids and so could store the same page twice, was removed in task 15.
 
 ### The licence gate (task 7)
 
@@ -242,7 +242,7 @@ Exit code: `0` when nothing failed, `1` when a document or a whole source failed
 
 - A chunk is expired when its `expires_at_ts` is now or earlier.
 - Running a source refreshes the dates of every page that is still in it. Unchanged pages are not embedded again. So what gets removed is content that left the source, or that was not refreshed within its window (90 days by default).
-- Only the chunks of the source being run are removed, in both knowledge collections. Running `roadmap-sh` never removes handbook content. The old legacy collections are never touched.
+- Only the chunks of the source being run are removed, in both knowledge collections. Running `roadmap-sh` never removes handbook content. Collections other than the two knowledge collections are never touched.
 - The sweep is skipped when the source could not be read, so a temporary outage does not delete anything. A document that failed keeps its old chunks until they expire.
 - The retriever ignores expired chunks when searching (Decision 6), because they stay stored until the next run of their source.
 
@@ -279,7 +279,7 @@ result.citations   # one {title, url, licence, attribution} per page
 result.empty       # True when nothing usable was found
 ```
 
-`search()` is the way to read the two knowledge collections. The interview and roadmap agents moved off the old `retrieve()` in task 11. It stays only until task 15, which checks for any remaining caller and removes it together with the old collections. Agents should not call `search()` directly. They call `retrieve_with_fallback()` (Decision 7), which wraps it.
+`search()` is the way to read the two knowledge collections. The interview and roadmap agents moved off the old `retrieve()` in task 11, and task 15 removed it, together with `retrieve_across_collections()`, `add_documents()` and the old collections. `search()` refuses any collection name other than the two knowledge collections. Agents should not call `search()` directly. They call `retrieve_with_fallback()` (Decision 7), which wraps it.
 
 ### What one search does
 
@@ -312,13 +312,13 @@ Content marked `all` or `general` fits any request, so a general interview quest
 | Setting | Default | Meaning |
 |---|---|---|
 | `top_k` | 5 | Results returned |
-| `min_similarity` | 0.30 | Below this a match is noise. It is the cutoff the agents use today |
+| `min_similarity` | 0.40 | Below this a match is noise. It is the cutoff the agents use. It was 0.30 until task 13 (Decision 10) |
 | `mmr` | on | Pick varied results. `mmr=False` gives plain best-first |
 | `mmr_lambda` | 0.7 | 1.0 means only relevance, 0.0 means only variety |
 | `max_per_doc` | 2 | Most chunks one page may supply. `None` or `0` switches it off |
 | candidates fetched | 4 x `top_k`, at least 20 | Extra candidates so the cutoff and variety have something to choose from |
 
-These are starting values. Task 13 (the golden set) tunes them.
+The cutoff was tuned in task 13 (0.30 to 0.40). The other values are still starting values.
 
 ### The result
 
@@ -513,12 +513,12 @@ Before the cap of 12, the roadmap agent ranks every retrieved chunk:
 rank = similarity x (0.6 + 0.3 x trust + 0.1 x freshness)
 ```
 
-- **Trust** comes from `SOURCE_TRUST`: official-docs 1.0, roadmap-sh 0.8, freecodecamp 0.8, tech-interview-handbook 0.7, any other source 0.5.
+- **Trust** comes from `SOURCE_TRUST`: official-docs 1.0, roadmap-sh 0.8, freecodecamp 0.7, tech-interview-handbook 0.7, any other source 0.5. (freeCodeCamp was 0.8 until task 13.)
 - **Freshness** is 1 for a page confirmed just now and falls evenly to 0 at 90 days, the same as the expiry. It is read from `fetched_at_ts`, which every ingest run refreshes, so it says when the page was last confirmed. A missing or odd date is neutral (0.5).
 - Similarity stays the main term, so trust and freshness only separate near ties. An official page beats a list match that is about 0.04 better, never a clearly better one. Nothing changes in the stored data.
 - **Coverage.** Every skill gap with a match keeps its best chunk before any skill gets a second one. Up to 12 skills are searched (the old loop stopped after 12 chunks, so later skills were never searched). The prompt still shows the real similarity.
 
-The weights and trust values are starting values. Task 13 tunes them against the golden set. The first runs found one weak spot (Docker, see Decision 10). Nothing has been changed yet.
+The three weights are still starting values. In task 13 the golden set found one weak spot (Docker, see Decision 10), and freeCodeCamp's trust was lowered from 0.8 to 0.7 to fix it.
 
 ### What it does not do
 
@@ -590,7 +590,7 @@ When a value looks better on `dev`, run `test` once with it. Only then change th
 
 - `--save` writes the run to `data/eval/results/<area>_v<N>_<time>.json`. `--compare FILE` prints which metrics moved, which cases started failing or passing, and which settings differ between the two runs, so a change in a number can be traced.
 - The first reviewed run is copied beside its dataset as `retrieval.v1.baseline.json` or `links.v1.baseline.json`, and `v1` is then frozen. A frozen version is never edited. A change is a `v2` file with a line in the set's changelog. A label is never changed just to turn a run green.
-- **No baseline is saved and no tolerance is agreed yet.** A tolerance (for example "no metric drops more than N points") comes from what the system really does, so it is set after the baseline.
+- **A first baseline was measured on 2026-11-24 (see "Results of 2026-11-24" below), but `v1` is not frozen and no tolerance is agreed.** The labels are still `model-draft`, so the two result files were not copied to `*.v1.baseline.json`. Compare against them with `--compare` by file name. A tolerance (for example "no metric drops more than N points") comes from what the system really does. A drop of more than 0.05 on any retrieval metric or on the plan pass rate was suggested as a starting point, and it is not agreed.
 
 ### LangSmith
 
@@ -602,13 +602,38 @@ When a value looks better on `dev`, run `test` once with it. Only then change th
 - **Learning plan (first 15 cases):** 9 of 11 `dev` cases passed. Both failures are the Docker pair (`rdm-003`, `rdm-015`): a freeCodeCamp topic page ranked above the official Get started page by a small margin. A higher trust weight or a lower freeCodeCamp trust fixes it. Eleven more ranking cases (including counter-cases where a community roadmap should win) were added before any weight is changed, so the choice does not rest on three scenarios.
 - **Gaps seen:** the query `k8s` does not find Kubernetes pages (`ret-034`), and the handbook's study-plan page can appear in searches for non-technical skills, because the agents have no role filter.
 
+### Results of 2026-11-24
+
+Two changes were chosen on `dev` and confirmed once on `test`, and then the whole set was run again with them. The knowledge base was 829 interview chunks and 127 learning chunks. The model was `openai/gpt-oss-120b`, one run per case.
+
+| | Cutoff 0.30, freeCodeCamp 0.8 (before) | Cutoff 0.40, freeCodeCamp 0.7 (after) |
+|---|---|---|
+| Retrieval precision | 0.62 | 0.77 |
+| Retrieval hit rate / MRR | 0.97 / 0.95 | 0.97 / 0.95 |
+| Retrieval "expect nothing" cases correct | 5 of 6 | 6 of 6 |
+| Learning plan pass rate | 22 of 26 (0.85) | 24 of 26 (0.92) |
+| Ranking cases | 13 of 16 | 15 of 16 |
+| Fairness cases (the Docker pair) | 0 of 2 | 2 of 2 |
+
+The files are `retrieval_v1_20261124T112652Z.json` and `roadmap_v1_20261124T112658Z.json` in `data/eval/results/`. The "before" runs are `retrieval_v1_20261124T110732Z.json` and `roadmap_v1_20261124T110737Z.json`.
+
+**Cutoff 0.30 to 0.40.** On `dev`, precision went from 0.61 to 0.81, with hit rate and MRR unchanged. On `test` it went from 0.62 to 0.66 (9 cases, so a small gain), with hit rate and MRR still 1.00. Every "expect nothing" case now comes back empty, and no case that passed before started failing. Changed in `app/rag/retriever.py`.
+
+**freeCodeCamp trust 0.8 to 0.7.** A freeCodeCamp topic page (`news/tag/docker`) ranked above the official Docker page. A higher trust weight (0.4 or 0.5) fixed it, and so did a lower freeCodeCamp trust (0.7 or 0.6). The lower trust was chosen because it is the narrower change: it touches one source and not the weights of every ranking. It also puts freeCodeCamp level with the handbook. On `dev` all 12 ranking cases passed, including the counter-cases where a community roadmap should win. On `test` the ranking cases gave the same result as before (3 of 4), so nothing got worse. The test split has no Docker case, so the Docker fix itself rests on `dev`. Changed in `app/agents/candidate/roadmap_agent.py`.
+
+**Cases that still fail (known weaknesses, not changed).**
+
+- `ret-034`, the query `k8s`: no Kubernetes page is found, because the embedding model does not link the abbreviation to the word. The label stays. An alias list (k8s to Kubernetes) would fix it. It is a separate piece of work.
+- `rdm-008`, Cold calling and Sales negotiation for a Sales Representative: the plan linked `pytorch.org/tutorials` and `roadmap.sh/devrel` and carried no notice, so a sales candidate would be shown unrelated tutorials. This is a real weakness, not a wrong label. The agent searches `learning resources for <skill>`, and the words "learning resources" are themselves close to generic tutorial pages, so they pass the cutoff for any skill. The plain queries in the retrieval set do not have that wording, which is why `ret-032` now passes and this case does not. The likely fix is a shorter query (the skill alone, or the skill and one word). It was not tried, because every try needs a full run of model calls and the baseline should show what the system does today. To be done as its own change, with `dev` runs and one `test` confirmation.
+- `rdm-017`, TypeScript for a Frontend Developer: `roadmap.sh/typescript` ranked above `typescriptlang.org/docs`, and both are in the plan. This case is in `test`, so it was not tuned for. The label may be too strict, because roadmap.sh is a reasonable first page for this role. A person decides this when the labels are checked. Nothing is changed to make it pass.
+
 ### What it does not do
 
 - It does not judge how good the plan's text is. It checks properties: links, sources, order, canary words.
 - It is small. A slice of two to five cases is a signal to look at, not a statistic.
 - There are no cases for the interview agent's questions yet. The retrieval cases cover its collection.
 - It does not run in CI. It needs ChromaDB and a Groq key, so it runs on demand.
-- The old Phase 2 set (`data/eval/retrieval_eval.json`, run by `backend/scripts/eval_retrieval.py`) targets the old `learning_resources` collection. It stays until task 15 removes the old retrieval code.
+- The old Phase 2 set (`data/eval/retrieval_eval.json`, 20 keyword cases run by `backend/scripts/eval_retrieval.py`) targeted the old collections. It was removed in task 15. It stays in git history, and the retrieval set above replaces it.
 
 ---
 
@@ -623,15 +648,16 @@ When a value looks better on `dev`, run `test` once with it. Only then change th
 | 10 | **Built.** `retrieve_with_fallback()` (Decision 7). The original live web lookup was dropped on 2026-11-19 |
 | 11 | **Built.** The interview and roadmap agents call `retrieve_with_fallback()` and return `sources` built from the citations, plus `notice` (Decision 8). The prompt note goes into the prompt on the general route. A learning plan can only link to retrieved pages |
 | 12 | **Built.** Three link-only lists (108 links), a link-health check on every link ingest, and ranking by trust and freshness (Decision 9). The credit is shown by task 16 |
-| 13 | **Built, baseline pending.** Two golden sets (63 cases), runners with comparison and settings sweeps, an optional LangSmith upload, and 345 unit tests (Decision 10). The cases are drafts to be checked, and v1 is not frozen yet |
-| 14 | Integration tests cover the filters, idempotency, the licence gate and the fallback (including that a general-knowledge answer carries no invented sources), and run the agents against the real ChromaDB |
+| 13 | **Built, first results recorded 2026-11-24.** Two golden sets (63 cases), runners with comparison and settings sweeps, an optional LangSmith upload, and 345 unit tests (Decision 10). The cutoff (0.40) and freeCodeCamp's trust (0.7) were tuned from the first runs. The cases are drafts to be checked, and v1 is not frozen yet |
+| 14 | **Built, run against the real ChromaDB.** `tests/integration/test_knowledge_layer.py` covers ingest, idempotency, changes, the licence gate, link-only pages, the expiry sweep, every retriever filter, ranking, the cutoff, citations and every fallback route, on throw-away collections that are dropped afterwards. It also reads the real collections without writing to them. `test_candidate_flow.py` runs both agents with real retrieval and Groq and checks that every link and source is a stored page and that an answer without sources carries the notice. Run with `-m integration` |
+| 15 | **Built.** The five old collections were deleted from ChromaDB (2026-11-24, after a verified snapshot), and the old `retrieve()`, `retrieve_across_collections()`, `add_documents()`, `get_vector_store()`, `seed_data.py`, `eval_retrieval.py` and the Phase 2 evaluation file were removed. `COLLECTIONS` now lists only the two knowledge collections |
 
 ---
 
 ## Findings from reading the code
 
 - `RetrieverAgent` (`agents/shared/retriever_agent.py`) was used nowhere and could not have worked: it `await`ed a function that is not async and passed `collection=` where the retriever expects `collection_name=`. Removed in task 9.
-- The real ingest runs on 2026-11-19 worked with ChromaDB's `upsert`, `get` with `where`, and `update` calls, and ChromaDB accepted the expiry filter (`$lte` on `expires_at_ts`, inside `$and` for one source). That filter matched nothing so far, and `delete` has not run for real. The retriever's filters (`$in`, `$gt`, `$and`) and the `embeddings` option were checked against an in-memory ChromaDB 0.5.23 (the version this project pins), which also ran the expiry sweep end to end. They have not yet run against the ChromaDB container with the real embedding model. The unit tests use a fake store. Task 14 proves all of this against the real client.
+- The real ingest runs on 2026-11-19 worked with ChromaDB's `upsert`, `get` with `where`, and `update` calls, and ChromaDB accepted the expiry filter (`$lte` on `expires_at_ts`, inside `$and` for one source). That filter matched nothing so far, and `delete` has not run for real. The retriever's filters (`$in`, `$gt`, `$and`) and the `embeddings` option were checked against an in-memory ChromaDB 0.5.23 (the version this project pins), which also ran the expiry sweep end to end. The unit tests use a fake store. Task 14 (`tests/integration/`) runs all of this against the ChromaDB container with the real embedding model, and it passed on 2026-11-24.
 - The old roadmap agent called the synchronous `retrieve()` straight from an async method, which blocked the event loop for the length of every search. Fixed in task 11 (Decision 8).
 - The roadmap agent stopped searching once it had 12 chunks, so with five or more skill gaps the later skills got no search. Fixed in task 12 (Decision 9).
 - The first link check treated a `HEAD` 404 as proof that a page was gone. The first real run showed a site that answers `HEAD` with 404 for a page that loads. Fixed in task 12.
@@ -642,21 +668,22 @@ When a value looks better on `dev`, run `test` once with it. Only then change th
 - **Share-alike licences** (CC-BY-SA) are refused for full text. Someone must decide whether we can accept them and what that means for our own content. To allow them, move their names from `NEEDS_DECISION` to `ALLOWED_FULL_TEXT` in `licence.py`.
 - The GitHub MCP server was confirmed on a real run on 2026-11-19 (image tag, `stdio` subcommand, response shape, folder listing). Stdio is refused in production, so ingest runs from a development or CI machine until the server is hosted over HTTP. See `docs/architecture/mcp.md`, section 10.
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
-- The retrieval defaults (cutoff 0.30, variety 0.7, 2 chunks per page) are starting values. The first `dev` run suggests a cutoff near 0.40 (Decision 10). Confirm it on the `test` split before changing `app/rag/retriever.py`.
+- The retrieval defaults for variety (0.7) and chunks per page (2) are still starting values. The cutoff was changed to 0.40 in task 13 (Decision 10).
 - **Live help for gaps (not planned).** Two ideas stay possible if the golden set shows the general-knowledge answers are too weak: a short list of trusted sites fetched live (our own topic-to-page table, nothing stored), or a test of Groq's `browser_search` for its cost, output format and storage rules. Each needs vetting first, and neither is scheduled.
 - The wording of the two fallback notes is a first version. Revisit it in task 16, when the screen shows the notice.
 - **No role filter in the agents (known limit).** See Decision 8. Non-technical roles may get weak software chunks until Phase 9 adds a role-to-family mapping. Task 13 measures it.
 - **The interview prompt still says "Reference material from real interviews".** The knowledge base holds preparation guides, not real interviews, so the wording is a little off. Fix it when the prompt is next touched.
 - **The frontend still reads the old resource `source` key.** `AnalysisView.tsx` uses it only as a tooltip. Task 16 updates it and shows `sources` and `notice`.
 - **The context budgets are starting values.** 12 resources and 500 characters per chunk for the roadmap; 3000 characters and 700 per chunk for the interview. Task 13 can tune them.
-- **The agents have not run against the real ChromaDB.** Their unit tests use a stand-in retriever. Task 14 runs them against the real client with the 127 learning chunks and the 829 interview chunks.
 - **The link check is manual.** Run `python -m app.ingest.run --source <name> --dry-run` after any list change. A scheduled run belongs with CI.
 - **The `github` token is not set on the development machine.** The handbook cannot be re-ingested until `GITHUB_PERSONAL_ACCESS_TOKEN` is in `backend/.env`. It is to be set before the last task of Phase 7. Until then, run the link sources one at a time, not with `--source all`.
 - **Links inside the handbook's text are not checked.** Only the link-only lists get the check.
 - **freeCodeCamp's terms, its YouTube channel's terms and the licence of its news articles are unread.** This has no effect while we only link (vetting log).
-- **Ranking weights and trust values are starting values.** The first run found the Docker case (Decision 10). Tune on the `dev` ranking cases with `--ranking-only`, confirm on `test`, then change `roadmap_agent.py`. Non-technical roles are thin in the official-documentation list until Phase 9.
-- **The evaluation set has no saved baseline yet.** A person must check the `model-draft` labels (`--require-reviewed`), then `v1` is frozen and `retrieval.v1.baseline.json` and `links.v1.baseline.json` are saved beside the data. Then a tolerance is agreed.
-- **Short names are not understood.** The query `k8s` finds no Kubernetes page (`ret-034`). A small alias list (k8s to Kubernetes, and similar) could fix it. Decide after the baseline.
+- **The three ranking weights (0.6, 0.3, 0.1) are still starting values.** freeCodeCamp's trust was lowered to 0.7 in task 13 (Decision 10). Non-technical roles are thin in the official-documentation list until Phase 9.
+- **The evaluation set is measured but not frozen.** The first scores are recorded (Decision 10, 2026-11-24), but all 63 labels are still `model-draft`. A person must check them (`--require-reviewed`), then `v1` is frozen and the two result files are copied to `retrieval.v1.baseline.json` and `links.v1.baseline.json` beside the data. Then a tolerance is agreed.
+- **Short names are not understood.** The query `k8s` finds no Kubernetes page (`ret-034`). A small alias list (k8s to Kubernetes, and similar) could fix it. Not scheduled.
+- **A skill with no matching content can still get unrelated links.** `rdm-008` (sales skills) was shown PyTorch tutorials, because the roadmap agent's query starts with "learning resources for", which is close to any tutorial page. A shorter query is the likely fix. Not scheduled. Decide before Phase 9 adds non-technical sources, which may hide it.
+- **`rdm-017` (TypeScript) fails its ranking check.** roadmap.sh ranks above typescriptlang.org. The label may be too strict. A person decides it when the labels are checked.
 - **The handbook's study-plan page can appear for non-technical skills.** It is tagged for technical roles, and the agents do not filter on role family. This is the same gap as the missing role filter above.
 - **The LangSmith upload has not run for real.** It is tested with a fake client only. Run `python -m evals.langsmith_upload --dry-run` first, and upload only if you want the cases in LangSmith.
 
@@ -673,3 +700,6 @@ When a value looks better on `dev`, run `test` once with it. Only then change th
 | 2026-11-19 | Added Decision 8: how the agents use the knowledge layer (task 11). The interview and roadmap agents now read the new collections through `retrieve_with_fallback()` and return `sources` and `notice`. Marked task 11 built, updated the status and the task table, and added five open items and one finding |
 | 2026-11-19 | Added Decision 9: learning links, link health and ranking (task 12). Two link lists added, the link check built and run for real (108 of 108 links answering), and resources ranked by trust and freshness. Updated the status, the adapter table, the ingest options and the open items |
 | 2026-11-23 | Added Decision 10: the golden evaluation set (task 13). Two sets (37 retrieval and 26 learning-plan cases), runners with saved runs and comparison, settings sweeps, an optional LangSmith upload, and unit tests. Recorded the real ingest of the two new link lists (`learning_knowledge` now 127 chunks) and the first `dev` runs. Updated the status, the task table and the open items |
+| 2026-11-24 | Recorded the first runs of the evaluation set against the real system (Decision 10): retrieval precision 0.62 to 0.77 and learning-plan pass rate 0.85 to 0.92. Changed the retrieval cutoff from 0.30 to 0.40 and freeCodeCamp's trust from 0.8 to 0.7. Listed three failing cases as known weaknesses. `v1` is not frozen because the labels are unchecked, and no tolerance is agreed |
+| 2026-11-24 | Marked task 14 built: integration tests run the knowledge layer and both agents against the real ChromaDB. Removed the open item and the finding that said they had not |
+| 2026-11-24 | Task 15: deleted the five old collections from ChromaDB after checking a snapshot of them, and removed the old retrieval code (`retrieve()`, `retrieve_across_collections()`, `add_documents()`, `get_vector_store()`), the seed and Phase 2 evaluation scripts, and the Phase 2 evaluation file. `app/rag/collections.py` lists only the two knowledge collections. Updated the status, the task table and the old-data notes |

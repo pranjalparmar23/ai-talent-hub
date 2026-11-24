@@ -52,7 +52,7 @@ RESOURCES_PER_SKILL = 3
 MAX_TOTAL_RESOURCES = 12
 MAX_SKILLS_SEARCHED = 12  # one search each; later gaps get generic entries
 MAX_CONTENT_CHARS = 500  # cap chunk size for prompt budget
-# Weak matches are dropped by search() itself (its default similarity cutoff, 0.30).
+# Weak matches are dropped by search() itself (its default similarity cutoff, 0.40).
 
 # ── Ranking (Phase 7, task 12) ───────────────────────────────────────────
 # rank score = similarity x (BASE + TRUST x trust + FRESH x freshness)
@@ -69,7 +69,10 @@ RANK_FRESH_WEIGHT = 0.1
 SOURCE_TRUST: dict[str, float] = {
     "official-docs": 1.0,  # published by the makers of the tool
     "roadmap-sh": 0.8,  # curated by a well-known community project
-    "freecodecamp": 0.8,
+    # Task 13: 0.8 let a freeCodeCamp tag page outrank the official Docker page on the
+    # golden set. 0.7 puts it level with the handbook and fixes that without a
+    # regression on the held-out cases.
+    "freecodecamp": 0.7,
     "tech-interview-handbook": 0.7,
 }
 DEFAULT_TRUST = 0.5
