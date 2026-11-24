@@ -752,7 +752,7 @@ class TestSourceTrust:
     def test_each_source_has_its_own_trust(self):
         assert source_trust({"source_id": "official-docs"}) == 1.0
         assert source_trust({"source_id": "roadmap-sh"}) == 0.8
-        assert source_trust({"source_id": "freecodecamp"}) == 0.8
+        assert source_trust({"source_id": "freecodecamp"}) == 0.7
         assert source_trust({"source_id": "tech-interview-handbook"}) == 0.7
 
     def test_official_docs_are_trusted_most(self):

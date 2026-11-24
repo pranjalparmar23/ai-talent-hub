@@ -36,9 +36,11 @@ logger = logging.getLogger(__name__)
 
 KNOWLEDGE_COLLECTIONS = (INTERVIEW_COLLECTION, LEARNING_COLLECTION)
 
-# Defaults for search(). They can be changed per call; task 13 tunes them.
+# Defaults for search(). They can be changed per call. The cutoff was raised from 0.30
+# to 0.40 in task 13: on the golden set precision went from 0.62 to 0.77 and the
+# no-match cases all came back empty, with hit rate and MRR unchanged.
 DEFAULT_TOP_K = 5
-DEFAULT_MIN_SIMILARITY = 0.30  # below this a match is noise (what the agents use now)
+DEFAULT_MIN_SIMILARITY = 0.40  # below this a match is noise (what the agents use)
 DEFAULT_MMR_LAMBDA = 0.7  # 1.0 = only relevance, 0.0 = only variety
 DEFAULT_MAX_PER_DOC = 2  # most chunks one page may supply
 FETCH_FACTOR = 4  # candidates fetched = top_k x this ...

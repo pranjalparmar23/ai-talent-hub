@@ -307,7 +307,7 @@ def test_a_top_k_of_zero_makes_no_calls(store):
 
 
 def test_the_defaults_are_the_documented_ones():
-    assert (DEFAULT_TOP_K, DEFAULT_MIN_SIMILARITY) == (5, 0.30)
+    assert (DEFAULT_TOP_K, DEFAULT_MIN_SIMILARITY) == (5, 0.40)
     assert (DEFAULT_MMR_LAMBDA, DEFAULT_MAX_PER_DOC) == (0.7, 2)
 
 
