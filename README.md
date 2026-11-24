@@ -218,7 +218,7 @@ All documents are in the [`docs`](docs) folder.
 | 4 | Interview coach module | Done |
 | 5 | Recruiter flow | Done |
 | 6 | Skills and MCP foundation | Done |
-| 7 | Better knowledge for the AI, using outside sources | In progress |
+| 7 | Better knowledge for the AI, using outside sources | Done |
 | 8 | Voice interviews | Planned |
 | 9 | Interviews and learning for all kinds of roles | Planned |
 | 10 | Testing the quality of AI answers | Planned |
