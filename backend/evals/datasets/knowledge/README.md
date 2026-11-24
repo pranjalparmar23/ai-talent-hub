@@ -9,7 +9,7 @@ Part of Phase 7, task 13. Related: `docs/architecture/knowledge-layer.md`, `back
 | File | What it is |
 |---|---|
 | `retrieval.v1.jsonl` | The cases, one JSON object per line. Never edited once published. |
-| `retrieval.v1.baseline.json` | The scores of the first reviewed run. Added after the baseline run (see below). |
+| `retrieval.v1.baseline.json` | The scores of the first reviewed run. Not added yet: the labels are still unchecked drafts (see below). |
 | `README.md` | This file. |
 
 ## A case
@@ -35,7 +35,7 @@ Part of Phase 7, task 13. Related: `docs/architecture/knowledge-layer.md`, `back
 
 | Metric | Meaning |
 |---|---|
-| precision | Relevant chunks returned divided by chunks returned. Measured over what came back, not over 5, because the 0.30 cutoff is meant to return fewer chunks when little matches. Returning nothing for a case that expects results scores 0. |
+| precision | Relevant chunks returned divided by chunks returned. Measured over what came back, not over 5, because the cutoff (0.40) is meant to return fewer chunks when little matches. Returning nothing for a case that expects results scores 0. |
 | hit rate | The share of cases where at least one returned chunk is relevant. |
 | MRR | The mean of 1 / (rank of the first relevant chunk), 0 when there is none. |
 | empty correct | For `expect_empty` cases: how many returned nothing. Not part of precision or MRR. |
@@ -78,11 +78,15 @@ Needs the knowledge collections to be filled first (`python -m app.ingest.run --
 
 | | Value |
 |---|---|
-| Baseline run | not run yet |
-| Date | |
-| Knowledge base at the time | |
-| precision / hit rate / MRR (all) | |
-| Agreed tolerance | not agreed yet |
+| First run | `retrieval_v1_20261124T112652Z.json` in `data/eval/results/` (not copied to `retrieval.v1.baseline.json`, because the labels are unchecked) |
+| Date | 2026-11-24 |
+| Settings | top_k 5, cutoff 0.40, MMR 0.7, 2 chunks per page |
+| Knowledge base at the time | `interview_knowledge` 829 chunks, `learning_knowledge` 127 chunks |
+| precision / hit rate / MRR (all) | 0.77 / 0.97 / 0.95 (dev 0.81 / 0.96 / 0.93, test 0.66 / 1.00 / 1.00) |
+| "Expect nothing" cases correct | 6 of 6 |
+| Agreed tolerance | not agreed yet (a drop of more than 0.05 on any metric was suggested) |
+
+The run before the cutoff change (0.30) is `retrieval_v1_20261124T110732Z.json`: precision 0.62, hit rate 0.97, MRR 0.95, 5 of 6 empty cases correct. Compare with `python -m evals.run_retrieval --compare retrieval_v1_20261124T112652Z.json`.
 
 Steps (from the golden-set rules):
 
@@ -93,7 +97,8 @@ Steps (from the golden-set rules):
 
 ## Known weaknesses
 
-- `ret-032` and `ret-033` (sales, customer support): the learning links have no content for these yet, so they expect nothing. Weak matches on other business pages may get through the 0.30 cutoff. When Phase 9 adds non-technical sources, revise these in a new version.
+- `ret-032` and `ret-033` (sales, customer support): the learning links have no content for these yet, so they expect nothing. At the old 0.30 cutoff `ret-032` returned a Developer Relations roadmap. At 0.40 both return nothing. When Phase 9 adds non-technical sources, revise these in a new version.
+- `ret-034` (the query `k8s`) fails: the embedding model does not link the abbreviation to Kubernetes, so the route is `general_knowledge` with `weak_match`. The label stays. An alias list would fix it.
 - No `regression` cases yet. Every bug we really hit becomes a case, with the tag `regression`.
 
 ## Rules for changing this set
@@ -116,3 +121,4 @@ Steps (from the golden-set rules):
 | Version | Date | Change |
 |---|---|---|
 | v1 | 2026-11-23 | First set: 37 cases (28 dev, 9 test). All `model-draft`; to be checked by a person before the baseline is frozen. |
+| v1 | 2026-11-24 | First run recorded (see above). No case or label changed. The retrieval cutoff in the app changed from 0.30 to 0.40 after a `dev` sweep and one `test` confirmation. |

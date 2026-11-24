@@ -9,7 +9,7 @@ Part of Phase 7, task 13. Related: `docs/architecture/knowledge-layer.md`, `back
 | File | What it is |
 |---|---|
 | `links.v1.jsonl` | The cases, one JSON object per line. Never edited once published. |
-| `links.v1.baseline.json` | The scores of the first reviewed run. Added after the baseline run (see below). |
+| `links.v1.baseline.json` | The scores of the first reviewed run. Not added yet: the labels are still unchecked drafts (see below). |
 | `README.md` | This file. |
 
 ## A case
@@ -85,7 +85,7 @@ Trying other ranking settings, with no model calls (fast, free and the same answ
 ```
 python -m evals.run_roadmap --ranking-only --split dev --verbose
 python -m evals.run_roadmap --ranking-only --split dev --sweep trust_weight=0.3,0.4,0.5
-python -m evals.run_roadmap --ranking-only --split dev --sweep trust.freecodecamp=0.8,0.7,0.6
+python -m evals.run_roadmap --ranking-only --split dev --sweep trust.freecodecamp=0.8,0.7,0.6   # 0.7 became the default in task 13
 python -m evals.run_roadmap --ranking-only --split dev --source-trust freecodecamp=0.7
 ```
 
@@ -97,20 +97,24 @@ Needs the learning collection filled first, and `GROQ_API_KEY` in `backend/.env`
 
 | | Value |
 |---|---|
-| Baseline run | not run yet |
-| Date | |
-| Knowledge base at the time | |
-| Model | |
-| Pass rate (all) | |
-| Agreed tolerance | not agreed yet |
+| First run | `roadmap_v1_20261124T112658Z.json` in `data/eval/results/` (not copied to `links.v1.baseline.json`, because the labels are unchecked) |
+| Date | 2026-11-24 |
+| Settings | weights 0.6 / 0.3 / 0.1, freeCodeCamp trust 0.7, retrieval cutoff 0.40, 1 run per case |
+| Knowledge base at the time | `interview_knowledge` 829 chunks, `learning_knowledge` 127 chunks |
+| Model | `openai/gpt-oss-120b` |
+| Pass rate (all) | 24 of 26 (0.92). Dev 18 of 19, test 6 of 7 |
+| Agreed tolerance | not agreed yet (a drop of more than 0.05 was suggested) |
+
+The run before the two changes (freeCodeCamp trust 0.8, cutoff 0.30) is `roadmap_v1_20261124T110737Z.json`: 22 of 26 (0.85), with the Docker pair (`rdm-003`, `rdm-015`), `rdm-008` and `rdm-017` failing. Compare with `python -m evals.run_roadmap --compare roadmap_v1_20261124T112658Z.json`. A single run per case can differ by chance, so use `--repeat` when a result matters.
 
 The steps are the same as for the retrieval set (`../knowledge/README.md`): run it, read every case that disagrees, decide whether the label or the system is wrong, check the drafts, freeze `v1`, save the baseline, then agree a tolerance from what the system really does.
 
 ## Known weaknesses
 
-- `rdm-008` and `rdm-009` (sales, customer support): the learning links have no content for these yet, so the plan should carry the notice. The agent searches "learning resources for ...", which may pull in weak matches on other courses. If so, that is a real weakness of retrieval for non-technical skills. Phase 9 adds non-technical sources.
+- `rdm-008` (sales) fails: the plan linked `pytorch.org/tutorials` and `roadmap.sh/devrel` and had no notice. The agent searches "learning resources for ...", and those words are close to any tutorial page, so weak matches pass the cutoff. This is a real weakness of the agent's query, and the label is right. The likely fix is a shorter query, to be done as its own change with a `dev` run and one `test` confirmation. `rdm-009` (customer support) passes. Phase 9 adds non-technical sources.
+- `rdm-017` (TypeScript, `test` split) fails: roadmap.sh ranks above typescriptlang.org, and both are linked. It was not tuned for. The label may be too strict. A person decides it when the labels are checked.
 - The ranking cases (tag `ranking`) depend on the starting weights (0.6 match, 0.3 trust, 0.1 freshness). Two kinds are mixed on purpose. In most, the official page of a tool should come first (`rdm-002` to `rdm-005`, `rdm-015` to `rdm-021`, `rdm-026`). In the counter-cases (`rdm-022` to `rdm-025`) a community roadmap is the better match, and trust must not push a weaker official page above it. A weight that fixes one kind must not break the other. A failure may mean the weights need tuning, or that the label is wrong. Check which, case by case.
-- The first run found one scenario where the official page did not rank first: Docker (`rdm-003`, `rdm-015`), where a freeCodeCamp topic page ranked above the official Get started page.
+- The first run found one scenario where the official page did not rank first: Docker (`rdm-003`, `rdm-015`), where a freeCodeCamp topic page ranked above the official Get started page. Fixed on 2026-11-24 by lowering freeCodeCamp's trust from 0.8 to 0.7 (both cases now pass, and so do the counter-cases `rdm-023` and `rdm-024`).
 - The invented-link check in `rdm-014` cannot fail today, because the agent already drops links it did not retrieve. It exists to catch that code breaking. The case's other checks (reviewed links, a Kubernetes host) can still fail.
 
 ## Rules for changing this set
@@ -133,3 +137,4 @@ Phase 10 decides the final place for evaluation data and uploads these cases to 
 |---|---|---|
 | v1 | 2026-11-23 | First set: 15 cases (11 dev, 4 test). All `model-draft`; to be checked by a person before the baseline is frozen. |
 | v1 | 2026-11-23 | Before the baseline was saved and v1 was frozen: added `rdm-016` to `rdm-026` (11 single-skill ranking cases, 8 dev and 3 test), because the first runs had only three distinct ranking scenarios. Now 26 cases (19 dev, 7 test), all `model-draft`. |
+| v1 | 2026-11-24 | First run recorded (see above). No case or label changed. In the app, freeCodeCamp's trust changed from 0.8 to 0.7 and the retrieval cutoff from 0.30 to 0.40, after `dev` runs and one `test` confirmation. |
