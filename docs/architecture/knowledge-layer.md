@@ -3,7 +3,7 @@
 How AI Talent Hub stores and finds reference knowledge (interview material, learning resources) after the Phase 7 rebuild. This covers the schema, the collection layout, the embedding model, how the pipeline, the licence gate and the source adapters fill the collections, how the retriever finds content, what happens when it finds nothing, and how the interview and learning-plan agents use all of that.
 
 **Tracker:** Phase 7, tasks 2 to 15. **Related:** `docs/architecture/mcp.md`, `docs/mcp/vetting-log.md`, `docs/attribution.md`, `.claude/skills/content-source-vetting/SKILL.md`.
-**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering) and were ingested for real on 2026-11-23 (44 and 23 chunks, so `learning_knowledge` holds 127). The golden evaluation set is built and has had its first runs (task 13, Decision 10). It was run against the real system on 2026-11-24. Two settings were changed because of it: the retrieval cutoff went from 0.30 to 0.40 and freeCodeCamp's trust from 0.8 to 0.7 (Decision 10). The results of that run are recorded as the starting scores. The labels are still unchecked drafts, so `v1` is not frozen. Integration tests now run the retriever, the pipeline and both agents against the real ChromaDB (task 14). The five old collections, the old `retrieve()` and the Phase 2 evaluation set were removed in task 15 (2026-11-24).
+**Status:** design agreed 2026-11-10. The schema, collections, ingestion pipeline, licence gate, two source adapters, and the ingest command with its expiry sweep are built and unit tested (updated 2026-11-19). Both sources were ingested for real on 2026-11-19 (see Decision 5). The retriever can search them (task 9, Decision 6), and `retrieve_with_fallback()` says when to answer from general knowledge instead (task 10, Decision 7). The interview and roadmap agents now read the new collections through it and return the sources they used (task 11, Decision 8). Learning links now come from three link-only lists (roadmap.sh, official documentation and freeCodeCamp). Every ingest checks them for dead pages, and the roadmap agent ranks resources by source trust and freshness (task 12, Decision 9). The two new lists passed a real link check on 2026-11-19 (108 of 108 links answering) and were ingested for real on 2026-11-23 (44 and 23 chunks, so `learning_knowledge` holds 127). The golden evaluation set is built and has had its first runs (task 13, Decision 10). It was run against the real system on 2026-11-24. Two settings were changed because of it: the retrieval cutoff went from 0.30 to 0.40 and freeCodeCamp's trust from 0.8 to 0.7 (Decision 10). The results of that run are recorded as the starting scores. The labels are still unchecked drafts, so `v1` is not frozen. Integration tests now run the retriever, the pipeline and both agents against the real ChromaDB (task 14). The five old collections, the old `retrieve()` and the Phase 2 evaluation set were removed in task 15 (2026-11-24). The learning-plan and interview screens now show the `sources` and the `notice`, and the interview's are saved with the session (task 16, Decision 11).
 
 ---
 
@@ -23,6 +23,7 @@ How AI Talent Hub stores and finds reference knowledge (interview material, lear
 | 10 | How the agents use it | Both agents call `retrieve_with_fallback()` in a worker thread, put the text into the prompt as untrusted data, and return `sources` and `notice`. A link in a learning plan must come from a retrieved page. Details in Decision 8 below |
 | 11 | How learning links are kept healthy and ranked | Link lists are checked for dead pages on every ingest (404 and 410 are dropped, anything unclear is kept). The roadmap agent ranks resources by similarity, nudged by source trust and freshness. Details in Decision 9 below |
 | 12 | How we know a change made things worse | A golden evaluation set of hand-checked cases (37 for retrieval, 26 for learning plans), run on demand against the real system and compared with a saved baseline. Tune on the `dev` cases and confirm on `test`. Details in Decision 10 below. First run recorded 2026-11-24 |
+| 13 | How sources and notices are shown | Learning plan and interview screens show the notice as a banner and the sources as links with a credit line. Only `http` and `https` pages are linked. The interview's sources and notice are saved on the session row, so they survive a refresh and a new tab. Details in Decision 11 below. Built 2026-11-24 |
 
 ---
 
@@ -406,7 +407,7 @@ The reason on the general route:
 - **Prompt note (for the model):** "No reviewed source matched this request. Answer from general knowledge only. Do not invent sources, links or quotes, and do not present the answer as based on reviewed material."
 - **User note (for the screen):** "Not based on our reviewed sources. This comes from general knowledge, so check it before relying on it."
 
-Both are first-version wording. Task 11 puts the first into the prompt and returns the second as `notice`. Task 16 shows it on the screen.
+Task 11 puts the first into the prompt and returns the second as `notice`. Task 16 shows the second on the screen exactly as the backend sends it, and the wording was kept (see Decision 11).
 
 ### Failure handling
 
@@ -437,7 +438,7 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 | Filters | None | None |
 | `sources` returned | The reviewed pages the plan actually links to | The reviewed pages that went into the prompt |
 | `notice` returned | When the plan has weeks but links to no reviewed page | When no reviewed material was used |
-| Where it reaches the caller | `GET /api/candidate/learning-plan` | `POST /api/candidate/interview/start` only |
+| Where it reaches the caller | `GET /api/candidate/learning-plan` | `POST /api/candidate/interview/start`, and `GET /api/candidate/interview/{session_id}` from the saved copy (task 16) |
 
 **Rules both agents follow**
 
@@ -454,7 +455,7 @@ Code: `app/agents/candidate/roadmap_agent.py`, `app/agents/candidate/interview_a
 
 **What `sources` means.** For a learning plan it is exact: the pages the plan links to. For an interview it is looser. The model is told to use the material for flavour and not to quote it, so `sources` lists the pages that could have shaped the opening question, not a claim about any sentence in it.
 
-**What is not stored.** The interview `sources` and `notice` are returned once, with the first question. They are not saved in the session row or in Redis, and the later questions come from the transcript, not from reference material.
+**What is stored.** The interview `sources` and `notice` are returned with the first question and, since task 16, also saved on the session row (`opening_sources`, `opening_notice`). They are not put in the history or in Redis, and the later questions come from the transcript, not from reference material. See Decision 11.
 
 **Known limit: no role filter.** Neither agent filters on `role_family`, because the agents do not yet know a role's family. `interview_knowledge` holds only software-engineering content, so a non-technical role can get weakly related chunks above the cutoff. The golden set (task 13) measures how often, and Phase 9 adds a role-to-family mapping.
 
@@ -637,6 +638,37 @@ The files are `retrieval_v1_20261124T112652Z.json` and `roadmap_v1_20261124T1126
 
 ---
 
+## Decision 11: showing sources and notices (task 16)
+
+Code: `frontend/src/shared/Sources.tsx` and `sourceHelpers.ts` (with `sourceHelpers.test.ts`), `AnalysisView.tsx`, `InterviewChat.tsx`, `InterviewSetup.tsx` and `services/api.ts`. On the backend: `InterviewSession` in `app/database/models.py`, `interview_service.py`, `InterviewSessionResponse` in `schemas.py` and the migration `e5b1c7a49d20`.
+
+**What the person sees**
+
+| Screen | Notice | Sources |
+|---|---|---|
+| Learning plan | A banner under the plan summary, when the plan links to no reviewed page | A "Sources" block at the end: each page's title as a link, its site, and its credit line (or its licence when there is no credit line). Each resource in a week is a link when it has a safe address, and plain text when it has none |
+| Interview | A banner under the first question, when no reviewed material was used | A "Based on" list under the first question, with the same link, site and credit line. Later questions show neither, because they come from the transcript |
+
+**Rules**
+
+- **The notice is shown exactly as the backend sends it.** The frontend adds no wording of its own, so the text lives in one place (`GENERAL_KNOWLEDGE_USER_NOTE`).
+- **Only `http` and `https` pages become links.** A relative path, `javascript:`, `data:` or an address with a name or password in it is shown as plain text. Links open in a new tab with `rel="noopener noreferrer"`. This is enforced in one function, `safeHref()`, which has its own tests.
+- **The credit line is shown next to the link** as recorded when the page was stored (`attribution`), with the licence as a fallback. This meets the credit rule in `docs/attribution.md`.
+- **A repeated page is shown once**, matched by address and then by title.
+- **Nothing is shown when there is nothing to show.** No sources and no notice means no block.
+
+**Saving the interview's sources.** The first version returned them once, with the first question, and passed them to the chat screen through the router. That lost them in a new tab or from a pasted link. The backend now saves them on the session row, in two nullable columns, `opening_sources` (JSON) and `opening_notice` (text). The chat screen reads them from `GET /api/candidate/interview/{session_id}`, and the router state is no longer used. The columns are kept out of the history and the Redis cache, which still hold only the conversation. A row with NULL in both reads as no sources and no notice.
+
+**Migration.** Existing databases need `alembic upgrade head`. A database created by `init_db()` that Alembic never recorded needs `alembic stamp c31ec2fe7c14` first, because `init_db()` creates missing tables but never adds columns.
+
+**What it does not do**
+
+- It does not backfill interviews that were started before the migration.
+- It does not show sources on later questions or on the feedback report.
+- It does not add component tests. The helper tests run in Node only, because the frontend has no DOM test environment.
+
+---
+
 ## What the rest of Phase 7 builds on this
 
 | Task | Uses |
@@ -647,10 +679,11 @@ The files are `retrieval_v1_20261124T112652Z.json` and `roadmap_v1_20261124T1126
 | 9 | **Built.** Retriever v2 (`RAGRetriever.search()`) filters on the fields above, skips expired chunks, and returns `title`, `url`, `licence` and `attribution` as citations |
 | 10 | **Built.** `retrieve_with_fallback()` (Decision 7). The original live web lookup was dropped on 2026-11-19 |
 | 11 | **Built.** The interview and roadmap agents call `retrieve_with_fallback()` and return `sources` built from the citations, plus `notice` (Decision 8). The prompt note goes into the prompt on the general route. A learning plan can only link to retrieved pages |
-| 12 | **Built.** Three link-only lists (108 links), a link-health check on every link ingest, and ranking by trust and freshness (Decision 9). The credit is shown by task 16 |
+| 12 | **Built.** Three link-only lists (108 links), a link-health check on every link ingest, and ranking by trust and freshness (Decision 9). The credit is shown by task 16 (Decision 11) |
 | 13 | **Built, first results recorded 2026-11-24.** Two golden sets (63 cases), runners with comparison and settings sweeps, an optional LangSmith upload, and 345 unit tests (Decision 10). The cutoff (0.40) and freeCodeCamp's trust (0.7) were tuned from the first runs. The cases are drafts to be checked, and v1 is not frozen yet |
 | 14 | **Built, run against the real ChromaDB.** `tests/integration/test_knowledge_layer.py` covers ingest, idempotency, changes, the licence gate, link-only pages, the expiry sweep, every retriever filter, ranking, the cutoff, citations and every fallback route, on throw-away collections that are dropped afterwards. It also reads the real collections without writing to them. `test_candidate_flow.py` runs both agents with real retrieval and Groq and checks that every link and source is a stored page and that an answer without sources carries the notice. Run with `-m integration` |
 | 15 | **Built.** The five old collections were deleted from ChromaDB (2026-11-24, after a verified snapshot), and the old `retrieve()`, `retrieve_across_collections()`, `add_documents()`, `get_vector_store()`, `seed_data.py`, `eval_retrieval.py` and the Phase 2 evaluation file were removed. `COLLECTIONS` now lists only the two knowledge collections |
+| 16 | **Built (2026-11-24).** The learning-plan screen shows the notice, linked resources and a Sources block. The interview screen shows the notice or a "Based on" list under the first question, read from the saved session. The interview's sources and notice are saved in two new columns on `interview_sessions` (migration `e5b1c7a49d20`) (Decision 11) |
 
 ---
 
@@ -670,10 +703,11 @@ The files are `retrieval_v1_20261124T112652Z.json` and `roadmap_v1_20261124T1126
 - The `domain` list is a starting set. Phase 9 will extend it for non-technical roles.
 - The retrieval defaults for variety (0.7) and chunks per page (2) are still starting values. The cutoff was changed to 0.40 in task 13 (Decision 10).
 - **Live help for gaps (not planned).** Two ideas stay possible if the golden set shows the general-knowledge answers are too weak: a short list of trusted sites fetched live (our own topic-to-page table, nothing stored), or a test of Groq's `browser_search` for its cost, output format and storage rules. Each needs vetting first, and neither is scheduled.
-- The wording of the two fallback notes is a first version. Revisit it in task 16, when the screen shows the notice.
+- **The wording of the two fallback notes is still a first version.** Task 16 shows the user note as a banner without changing it. Change it only after real use, and then in `GENERAL_KNOWLEDGE_USER_NOTE` alone, since the screens show whatever the backend sends.
 - **No role filter in the agents (known limit).** See Decision 8. Non-technical roles may get weak software chunks until Phase 9 adds a role-to-family mapping. Task 13 measures it.
 - **The interview prompt still says "Reference material from real interviews".** The knowledge base holds preparation guides, not real interviews, so the wording is a little off. Fix it when the prompt is next touched.
-- **The frontend still reads the old resource `source` key.** `AnalysisView.tsx` uses it only as a tooltip. Task 16 updates it and shows `sources` and `notice`.
+- **Interviews started before the migration have no saved sources.** Their `sources` is an empty list and `notice` is null, so the screen shows nothing under the first question. Nothing is backfilled, because the original retrieval cannot be reproduced.
+- **The screens were checked by hand, not by automated browser tests.** The frontend has unit tests for the link and credit helpers only. A component test setup (a DOM test environment) is not installed.
 - **The context budgets are starting values.** 12 resources and 500 characters per chunk for the roadmap; 3000 characters and 700 per chunk for the interview. Task 13 can tune them.
 - **The link check is manual.** Run `python -m app.ingest.run --source <name> --dry-run` after any list change. A scheduled run belongs with CI.
 - **The `github` token is not set on the development machine.** The handbook cannot be re-ingested until `GITHUB_PERSONAL_ACCESS_TOKEN` is in `backend/.env`. It is to be set before the last task of Phase 7. Until then, run the link sources one at a time, not with `--source all`.
@@ -703,3 +737,4 @@ The files are `retrieval_v1_20261124T112652Z.json` and `roadmap_v1_20261124T1126
 | 2026-11-24 | Recorded the first runs of the evaluation set against the real system (Decision 10): retrieval precision 0.62 to 0.77 and learning-plan pass rate 0.85 to 0.92. Changed the retrieval cutoff from 0.30 to 0.40 and freeCodeCamp's trust from 0.8 to 0.7. Listed three failing cases as known weaknesses. `v1` is not frozen because the labels are unchecked, and no tolerance is agreed |
 | 2026-11-24 | Marked task 14 built: integration tests run the knowledge layer and both agents against the real ChromaDB. Removed the open item and the finding that said they had not |
 | 2026-11-24 | Task 15: deleted the five old collections from ChromaDB after checking a snapshot of them, and removed the old retrieval code (`retrieve()`, `retrieve_across_collections()`, `add_documents()`, `get_vector_store()`), the seed and Phase 2 evaluation scripts, and the Phase 2 evaluation file. `app/rag/collections.py` lists only the two knowledge collections. Updated the status, the task table and the old-data notes |
+| 2026-11-24 | Task 16: added Decision 11. The learning-plan and interview screens show the notice and the sources with their credit lines, and only safe links are clickable. The interview's sources and notice are now saved on the session row (new migration `e5b1c7a49d20`), so they show after a refresh or in a new tab. Updated the status, the task table, Decisions 7 and 8 and the open items |

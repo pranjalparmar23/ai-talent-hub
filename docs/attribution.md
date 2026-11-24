@@ -11,9 +11,10 @@ This is a record of what we use and how we credit it, not legal advice.
 
 ## How credit works in the app
 
-- Every stored chunk carries its source id, page URL, licence and credit line as metadata. Retrieval returns them as the citation, and the interface shows them next to the answer (tasks 9 and 16).
+- Every stored chunk carries its source id, page URL, licence and credit line as metadata. Retrieval returns them as the citation, and the interface shows them next to the answer (tasks 9 and 16). A learning plan lists its sources at the end, and an interview shows them under the first question. Each source is shown with its link and its credit line, or its licence when it has no credit line.
 - The licence gate (`app/ingest/licence.py`) refuses any document without a recorded licence and credit line. Share-alike licences (CC-BY-SA) are refused until a human decides how they affect our corpus.
-- When nothing in the knowledge base matches, no source is shown. The answer comes from the model's own knowledge and is labelled as not based on our reviewed sources (task 10).
+- When nothing in the knowledge base matches, no source is shown. The answer comes from the model's own knowledge and is labelled as not based on our reviewed sources (task 10). The screens show that label as a banner, with the wording the backend sends (task 16).
+- The sources of an interview's first question are saved with the interview, so the credit is still shown when the interview is opened again.
 - There are two ways to use a source:
   - **Full text:** only when the licence allows copying. The credit line and licence notice stay with the content.
   - **Link only:** for restrictive or unconfirmed licences. We store a link, a title and a short description that we wrote ourselves. Nothing is copied from the source.

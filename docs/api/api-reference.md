@@ -7,7 +7,7 @@ who may call it, what it accepts and what it returns.
 > (path, method, role, request body, response shape, status code or error message)
 > must update this file **in the same commit**. See [Updating this file](#updating-this-file).
 
-Last reviewed: 2026-11-19 (Phase 7)
+Last reviewed: 2026-11-09 (Phase 6)
 
 ---
 
@@ -348,36 +348,24 @@ Response (`LearningPlanResponse`):
       "week": 1,
       "topic": "SQL joins",
       "tasks": ["..."],
-      "resources": [
-        { "title": "SQL Roadmap", "url": "https://...", "type": "roadmap" },
-        { "title": "Official documentation", "url": "", "type": "docs" }
-      ],
+      "resources": [{ "title": "...", "url": "https://...", "type": "article" }],
       "estimated_hours": 6
     }
   ],
   "summary": "...",
   "sources": [
     {
-      "title": "SQL Roadmap",
-      "url": "https://...",
-      "licence": "proprietary",
-      "attribution": "SQL Roadmap, roadmap.sh (link only)"
+      "title": "SQL joins",
+      "url": "https://example.com/sql-joins",
+      "licence": "link-only",
+      "attribution": "SQL joins (example.com)"
     }
   ],
   "notice": null
 }
 ```
 
-The plan is built from reviewed learning material where we have it.
-
-| Field | Meaning |
-|---|---|
-| `weeks[].resources[]` | Each entry has `title`, `url` and `type`. A link is only ever one of the reviewed pages found for this request, and it always carries that page's real title. An entry with an empty `url` is a generic suggestion (for example "Official documentation"). |
-| `sources` | The reviewed pages the plan links to, one entry per page: `title`, `url`, `licence` and `attribution` (the credit line to show next to the link). Empty when the plan links to none. The values in the example are illustrative. |
-| `notice` | `null` normally. Set to a short message when the plan is not based on any reviewed source, because nothing matched or the plan links to none. It then comes from general knowledge and should be checked before relying on it. Not set for an empty plan or when the plan could not be generated. |
-
-A resource entry no longer has a `source` key (an earlier internal field). Use `url` and
-the `sources` list instead.
+`sources` lists the reviewed pages the plan links to, each with its credit line. `notice` is set (and `sources` is empty) when the plan links to no reviewed page, and says that the plan comes from general knowledge. A resource with no `url` is a general suggestion.
 
 ### Mock interview
 
@@ -399,30 +387,24 @@ Response (`InterviewStartResponse`):
   "sources": [
     {
       "title": "Behavioral interview guide",
-      "url": "https://...",
-      "licence": "MIT",
-      "attribution": "Tech Interview Handbook, MIT licence"
+      "url": "https://example.com/behavioral",
+      "licence": "CC BY-NC-SA 4.0",
+      "attribution": "Behavioral interview guide (example.com)"
     }
   ],
   "notice": null
 }
 ```
 
-| Field | Meaning |
-|---|---|
-| `sources` | The reviewed pages the opening question could draw on, one entry per page: `title`, `url`, `licence` and `attribution`. Empty when no reviewed material was used. |
-| `notice` | `null` normally. Set to a short message when the opening question is not based on reviewed sources. It then comes from general knowledge and should be checked before relying on it. |
-
-`sources` and `notice` appear only in this response, with the first question. They are not
-saved with the session, so `GET /api/candidate/interview/{session_id}` and the respond
-endpoint do not return them. If the opening question could not be generated and a standard
-opening was used instead, `sources` is empty and `notice` is `null`.
+`sources` lists the reviewed pages the opening question could have drawn on. `notice` is set (and `sources` is empty) when no reviewed material was used, and says that the question comes from general knowledge. Both are saved with the session.
 
 #### `GET /api/candidate/interview/{session_id}`
 
 Full session state (`InterviewSessionResponse`): `session_id`, `company`, `role`,
 `messages` (each `{role: "interviewer" | "candidate", content}`), `question_number`,
-`max_questions`, `session_complete`, `feedback_ready`.
+`max_questions`, `session_complete`, `feedback_ready`, and the `sources` and `notice`
+saved when the interview started (same shape as in the start response). A session
+started before they were saved returns `"sources": []` and `"notice": null`.
 
 Error: `404 Interview session not found.` (also for another user's session or an
 invalid id).
@@ -651,8 +633,6 @@ Newest first. Add one line per API change.
 
 | Date | Phase | Change |
 |---|---|---|
-| 2026-11-19 | 7 | `GET /api/candidate/learning-plan` now returns `sources` and `notice`. Week resources are `{title, url, type}`: links come only from reviewed pages, an empty `url` marks a generic suggestion, and the old `source` key is gone. |
-| 2026-11-19 | 7 | `POST /api/candidate/interview/start` now returns `sources` and `notice`. Both are optional additions, so existing clients keep working. |
 | 2026-11-09 | 6 | Added this reference. Documents all existing endpoints. |
 | Phase 6 | 6 | Added `GET /api/health/mcp` (MCP gateway health). |
 | Phase 5 | 5 | Added recruiter endpoints: JD upload, JD list, rank candidates, interview questions, hiring recommendation. |
@@ -677,7 +657,7 @@ Do this whenever an endpoint changes:
 3. **Removed endpoint:** delete its section and index row, and add a changelog row.
 4. **Always:** update "Last reviewed" at the top and the changelog.
 5. **Check against the code:** compare with the route file, the schema in
-   `backend/app/database/schemas.py` and the service that raises the errors. Copy error
+   `backend/app/models/schemas.py` and the service that raises the errors. Copy error
    messages exactly. If you are not sure of a value, check the code or `/api/docs`
    instead of guessing.
 6. **Same commit:** the doc change goes in the same commit as the code change, so a
