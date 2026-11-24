@@ -4,6 +4,8 @@ import toast from 'react-hot-toast'
 import { ArrowLeft, ArrowRight, Loader2, Send } from 'lucide-react'
 import { candidateAPI, type InterviewMessage } from '../services/api'
 import { errorMessage, errorStatus } from '../shared/errors'
+import { Notice, SourceList } from '../shared/Sources'
+import { readOpening, type OpeningMaterial } from '../shared/sourceHelpers'
 
 const SERIF = { fontFamily: '"Instrument Serif", "Iowan Old Style", Georgia, serif' }
 
@@ -21,6 +23,9 @@ export default function InterviewChat() {
 
   const [messages, setMessages] = useState<InterviewMessage[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
+  // What the opening question was based on. The backend saves it with the session, so it
+  // is there after a refresh, in a new tab and from a pasted link. Old sessions have none.
+  const [opening, setOpening] = useState<OpeningMaterial | null>(null)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -32,6 +37,7 @@ export default function InterviewChat() {
     try {
       const { data } = await candidateAPI.getInterviewSession(sessionId)
       setMessages(data.messages)
+      setOpening(readOpening({ sources: data.sources, notice: data.notice }))
       setMeta({
         company: data.company,
         role: data.role,
@@ -157,7 +163,15 @@ export default function InterviewChat() {
       <main className="flex-1 overflow-y-auto px-6 py-8">
         <div className="max-w-2xl mx-auto space-y-8">
           {messages.map((m, i) => (
-            <Bubble key={i} message={m} />
+            <div key={i}>
+              <Bubble message={m} />
+              {i === 0 && m.role === 'interviewer' && opening && (
+                <div className="mt-4 max-w-[85%] space-y-3">
+                  <Notice text={opening.notice} />
+                  <SourceList sources={opening.sources} heading="Based on" />
+                </div>
+              )}
+            </div>
           ))}
           {sending && (
             <div className="flex items-center gap-2 text-xs text-[#8996AD]">

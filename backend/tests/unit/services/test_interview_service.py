@@ -107,7 +107,9 @@ def svc(monkeypatch, redis):
     rows: dict[uuid.UUID, dict] = {}
     service.rows = rows  # exposed for assertions
 
-    async def create_row(session_id, user_id, company, role, history):
+    async def create_row(
+        session_id, user_id, company, role, history, sources=None, notice=None
+    ):
         rows[session_id] = {
             "id": session_id,
             "user_id": str(user_id),
@@ -115,6 +117,8 @@ def svc(monkeypatch, redis):
             "role": role,
             "history": list(history),
             "feedback": None,
+            "sources": list(sources or []),
+            "notice": notice,
         }
 
     async def get_row(session_id, user_id):
@@ -202,20 +206,31 @@ class TestStart:
         assert result["notice"] is None
 
     @pytest.mark.asyncio
-    async def test_sources_are_not_stored_with_the_session(self, svc, redis):
+    async def test_sources_and_notice_are_saved_on_the_session_row(self, svc):
         svc.interviewer = FakeInterviewer(sources=[SOURCE], notice=NOTICE)
 
         result = await _start(svc)
 
-        sid = uuid.UUID(result["session_id"])
-        assert set(svc.rows[sid]) == {
-            "id",
-            "user_id",
-            "company",
-            "role",
-            "history",
-            "feedback",
-        }
+        row = svc.rows[uuid.UUID(result["session_id"])]
+        assert row["sources"] == [SOURCE]
+        assert row["notice"] == NOTICE
+
+    @pytest.mark.asyncio
+    async def test_nothing_to_save_gives_an_empty_list_and_no_notice(self, svc):
+        result = await _start(svc)
+
+        row = svc.rows[uuid.UUID(result["session_id"])]
+        assert row["sources"] == []
+        assert row["notice"] is None
+
+    @pytest.mark.asyncio
+    async def test_sources_stay_out_of_the_history_and_the_cache(self, svc, redis):
+        svc.interviewer = FakeInterviewer(sources=[SOURCE], notice=NOTICE)
+
+        result = await _start(svc)
+
+        row = svc.rows[uuid.UUID(result["session_id"])]
+        assert all(set(m) == {"role", "content"} for m in row["history"])
         cached = await MemoryAgent(result["session_id"], client=redis).get_history()
         assert all(set(m) == {"role", "content"} for m in cached)
 
@@ -457,6 +472,52 @@ class TestGetSession:
         assert state["question_number"] == 1
         assert state["session_complete"] is False
         assert state["feedback_ready"] is False
+
+    @pytest.mark.asyncio
+    async def test_returns_the_saved_sources_and_notice(self, svc):
+        svc.interviewer = FakeInterviewer(sources=[SOURCE], notice=NOTICE)
+        sid = (await _start(svc))["session_id"]
+
+        state = await svc.get_session(sid, USER_ID)
+
+        assert state["sources"] == [SOURCE]
+        assert state["notice"] == NOTICE
+
+    @pytest.mark.asyncio
+    async def test_sources_survive_the_conversation_and_the_cache(self, svc, redis):
+        svc.interviewer = FakeInterviewer(sources=[SOURCE])
+        sid = (await _start(svc))["session_id"]
+        await _answer(svc, sid)
+        await MemoryAgent(
+            sid, client=redis
+        ).clear()  # cache expired: the row is the only copy
+
+        state = await svc.get_session(sid, USER_ID)
+
+        assert state["sources"] == [SOURCE]
+        assert len(state["messages"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_session_without_sources_has_an_empty_list_and_no_notice(self, svc):
+        sid = (await _start(svc))["session_id"]
+        state = await svc.get_session(sid, USER_ID)
+        assert state["sources"] == []
+        assert state["notice"] is None
+
+    @pytest.mark.asyncio
+    async def test_session_saved_before_sources_were_stored_still_loads(self, svc):
+        """An old row has no sources or notice; the screen must still get an answer."""
+        sid = (await _start(svc))["session_id"]
+        original = svc._get_row
+
+        async def old_row(session_id, user_id):
+            row = await original(session_id, user_id)
+            return {**row, "sources": [], "notice": None}
+
+        svc._get_row = old_row
+        state = await svc.get_session(sid, USER_ID)
+        assert state["sources"] == []
+        assert state["notice"] is None
 
     @pytest.mark.asyncio
     async def test_complete_and_feedback_flags(self, svc):

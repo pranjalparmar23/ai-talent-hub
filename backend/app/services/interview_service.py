@@ -11,9 +11,11 @@ Interview length is fixed at MAX_QUESTIONS candidate answers. No schema change i
 needed: completion is derived from the number of candidate answers in the history.
 
 Knowledge sources (Phase 7): the opening question may be based on reviewed interview
-material. start_session() passes the agent's `sources` and `notice` on to the caller so
-the app can show them next to the first question. They are not stored: the session row
-keeps only the conversation, and the later questions come from the transcript.
+material. start_session() returns the agent's `sources` and `notice` to the caller and
+also saves them on the session row (`opening_sources`, `opening_notice`), so
+get_session() can show them again after a refresh, in a new tab or from a pasted link.
+They are not put in the history or the Redis cache: those hold only the conversation,
+and the later questions come from the transcript.
 """
 
 import logging
@@ -60,8 +62,12 @@ class InterviewService:
         question = result["question"]
 
         session_id = uuid.uuid4()
+        sources = list(result.get("sources") or [])
+        notice = result.get("notice")
         history = [{"role": "ai", "content": question}]
-        await self._create_row(session_id, user_uuid, company, role, history)
+        await self._create_row(
+            session_id, user_uuid, company, role, history, sources, notice
+        )
         await self._remember(self.memory_factory(str(session_id)), False, history, [])
 
         return {
@@ -69,8 +75,8 @@ class InterviewService:
             "question": question,
             "question_number": 1,
             "max_questions": MAX_QUESTIONS,
-            "sources": result.get("sources") or [],
-            "notice": result.get("notice"),
+            "sources": sources,
+            "notice": notice,
         }
 
     async def process_response(
@@ -165,6 +171,8 @@ class InterviewService:
             "max_questions": MAX_QUESTIONS,
             "session_complete": answers >= MAX_QUESTIONS or row["feedback"] is not None,
             "feedback_ready": row["feedback"] is not None,
+            "sources": row["sources"],
+            "notice": row["notice"],
         }
 
     # ── History (Redis cache over Postgres truth) ──────────────────────────
@@ -218,6 +226,8 @@ class InterviewService:
         company: str,
         role: str,
         history: list[dict],
+        sources: list[dict] | None = None,
+        notice: str | None = None,
     ) -> None:
         async with AsyncSessionLocal() as db:
             db.add(
@@ -227,6 +237,8 @@ class InterviewService:
                     company=company,
                     role=role,
                     history=history,
+                    opening_sources=list(sources or []),
+                    opening_notice=notice,
                 )
             )
             await db.commit()
@@ -258,6 +270,8 @@ class InterviewService:
                 "role": row.role or "",
                 "history": list(row.history or []),
                 "feedback": row.feedback,
+                "sources": list(row.opening_sources or []),
+                "notice": row.opening_notice,
             }
 
     async def _save_history(self, session_id: uuid.UUID, history: list[dict]) -> None:

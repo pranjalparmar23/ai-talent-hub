@@ -17,6 +17,8 @@ import {
   type LearningPlanResponse,
 } from '../services/api'
 import axios from 'axios'
+import { Notice, PageLink, SourceList } from '../shared/Sources'
+import { safeHref } from '../shared/sourceHelpers'
 
 type Section = 'ats' | 'gap' | 'plan'
 
@@ -460,6 +462,7 @@ function PlanPanel({
             {data.summary}
           </p>
         )}
+        <Notice text={data.notice} className="mt-5 max-w-2xl" />
       </div>
 
       {/* Weeks timeline */}
@@ -468,6 +471,8 @@ function PlanPanel({
           <WeekCard key={week.week} week={week} />
         ))}
       </div>
+
+      <SourceList sources={data.sources} className="mt-10 pt-6 border-t border-white/[0.06]" />
     </div>
   )
 }
@@ -521,15 +526,23 @@ function WeekCard({ week }: { week: LearningPlanResponse['weeks'][number] }) {
 
         {week.resources.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
-            {week.resources.map((r, i) => (
-              <span
-                key={i}
-                className="text-[10px] tracking-[0.1em] uppercase text-[#8996AD] px-2 py-1 rounded border border-white/[0.06]"
-                title={r.source || ''}
-              >
-                {r.title}
-              </span>
-            ))}
+            {week.resources.map((r, i) => {
+              const chip =
+                'text-[10px] tracking-[0.1em] uppercase text-[#8996AD] px-2 py-1 rounded border border-white/[0.06]'
+              return safeHref(r.url) ? (
+                <PageLink
+                  key={i}
+                  url={r.url}
+                  className={`${chip} hover:text-[#E7ECF3] hover:border-[#7CFFC4]/40 transition-colors`}
+                >
+                  {r.title}
+                </PageLink>
+              ) : (
+                <span key={i} className={chip}>
+                  {r.title}
+                </span>
+              )
+            })}
           </div>
         )}
       </div>

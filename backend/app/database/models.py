@@ -61,6 +61,10 @@ class InterviewSession(Base):
     role = Column(String)
     history = Column(JSON, default=list)
     feedback = Column(JSON)
+    # What the opening question was based on (Phase 7): the reviewed pages, and the
+    # note shown when none matched. Both are empty for sessions created before this.
+    opening_sources = Column(JSON)
+    opening_notice = Column(Text)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     user = relationship("User", back_populates="interview_sessions")

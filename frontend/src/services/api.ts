@@ -94,12 +94,27 @@ export interface SkillGapResponse {
   gap_percentage: number;
 }
 
+// One reviewed page behind an answer (the backend's SourceItem).
+export interface SourceItem {
+  title: string;
+  url: string;
+  licence: string;
+  attribution: string; // the credit line to show next to the link
+}
+
+// A resource inside a plan week. `url` is empty for a general suggestion with no page.
+export interface PlanResource {
+  title: string;
+  url?: string;
+  type?: string;
+}
+
 export interface RoadmapWeek {
   week: number;
   topic: string;
   goal?: string | null;
   tasks: string[];
-  resources: { title: string; source?: string; type?: string }[];
+  resources: PlanResource[];
   estimated_hours: number | null;
 }
 
@@ -109,6 +124,9 @@ export interface LearningPlanResponse {
   target_role: string | null;
   weeks: RoadmapWeek[];
   summary: string | null;
+  // The reviewed pages the plan links to. `notice` is set when it rests on none.
+  sources: SourceItem[];
+  notice: string | null;
 }
 
 // ── Interview (Phase 4) ─────────────────────────────────────
@@ -123,6 +141,10 @@ export interface InterviewStartResponse {
   question: string;
   question_number: number;
   max_questions: number;
+  // Reviewed pages the opening question drew on. `notice` is set when it drew on none.
+  // The backend also saves them, so the chat screen reads them from the session.
+  sources: SourceItem[];
+  notice: string | null;
 }
 
 export interface InterviewRespondResponse {
@@ -141,6 +163,10 @@ export interface InterviewSession {
   max_questions: number;
   session_complete: boolean;
   feedback_ready: boolean;
+  // What the opening question was based on, saved when the interview started.
+  // Empty (and no notice) for interviews created before these were saved.
+  sources: SourceItem[];
+  notice: string | null;
 }
 
 export interface InterviewFeedback {
