@@ -294,6 +294,10 @@ class InterviewSessionResponse(BaseModel):
     max_questions: int = 6
     session_complete: bool = False
     feedback_ready: bool = False
+    # What the opening question was based on, saved when the interview started.
+    # Empty for sessions created before these were stored.
+    sources: List[SourceItem] = Field(default_factory=list)
+    notice: Optional[str] = None
 
 
 class InterviewFeedbackResponse(BaseModel):
