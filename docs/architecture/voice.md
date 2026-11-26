@@ -76,11 +76,19 @@ Quota settings (added in Task 2, all optional, read from the environment; see `b
 
 A bad value (not a whole number, or negative) is ignored with a warning and the default stays.
 
+Speech-to-text client settings (added in Task 3, optional):
+
+| Setting | Purpose | Default |
+|---|---|---|
+| `VOICE_STT_MODEL` | Whisper model name (a retirement is a one-line change) | `whisper-large-v3-turbo` |
+| `VOICE_MAX_AUDIO_BYTES` | Largest recording accepted before any call is made | 10,485,760 (Groq's free-plan limit is 25 MB) |
+
+`GROQ_API_KEY` is the existing key; the client reads it when a call is made.
+
 Planned settings, added with the tasks that use them:
 
 | Setting | Purpose | Default | Task |
 |---|---|---|---|
-| `VOICE_STT_MODEL` | Whisper model name | `whisper-large-v3-turbo` | 3 |
 | `VOICE_MAX_RECORDING_SECONDS` | Longest recording accepted | 120 | 4 |
 | `VOICE_TTS_PROVIDER` | `browser` or `orpheus` | `browser` | 5 |
 | `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE` | Orpheus model and voice | `canopylabs/orpheus-v1-english`, `daniel` | 5 |
@@ -98,15 +106,19 @@ decision = await quota.reserve(STT, user_id, audio_seconds)   # or TTS with the 
 if not decision.allowed:
     raise HTTPException(decision.http_status, decision.message)   # "type instead"
 try:
-    result = await call_groq(...)
-except GroqRateLimited as exc:
+    transcript = await speech.transcribe(audio, content_type, declared_seconds=declared)
+except SpeechRateLimited as exc:
     await quota.release(decision.reservation)
     await quota.record_rate_limited(STT, exc.retry_after)
     raise
-except Exception:
-    await quota.release(decision.reservation)     # the call never used Groq's quota
+except NoSpeechDetected as exc:
+    # Groq processed the audio, so quota was used: adjust, do not release.
+    await quota.adjust(decision.reservation, exc.audio_seconds or declared)
     raise
-await quota.adjust(decision.reservation, real_audio_seconds)  # correct to the real length
+except SpeechError:
+    await quota.release(decision.reservation)     # the call did not use Groq's quota
+    raise
+await quota.adjust(decision.reservation, transcript.audio_seconds)  # the real length
 ```
 
 **What is counted.** A reservation adds to every counter at once; if any counter would go over its cap, all of them are rolled back, so a denied call never uses anything.
@@ -138,6 +150,66 @@ Every denial carries a friendly message that points the candidate to typing, and
 - **`remaining(kind, user_id)`** returns how much this user can still use, the lowest of their own and the organisation's room, for the interview screen to show later.
 - **Browser speech needs no quota** because it runs on the device.
 
+## Speech-to-text client (Task 3)
+
+`app/services/speech_service.py` (`SpeechService`) turns one recording into text with Groq Whisper. It has no endpoint of its own: Task 4 adds `POST …/transcribe`, asks the quota guard first, and calls this.
+
+```python
+transcript = await SpeechService().transcribe(audio_bytes, "audio/webm;codecs=opus", declared_seconds=31.2)
+transcript.text, transcript.audio_seconds, transcript.latency_s
+```
+
+**One request, no retries.** The client uses plain `httpx` and not the Groq SDK, which (as far as we know) retries 429s by itself. A retry would spend quota behind the guard's back. A 429 is raised as `SpeechRateLimited` with Groq's `retry-after`, which the endpoint passes to `VoiceQuotaService.record_rate_limited`.
+
+**Checks before any call.** Empty audio, audio over `VOICE_MAX_AUDIO_BYTES` and unsupported content types are refused without calling Groq. The file is sent with an extension that matches the browser's content type, because Groq's documentation does not say whether it detects the format from the name or the content.
+
+| Browser recording | Sent as |
+|---|---|
+| `audio/webm` (Chrome, Edge, Firefox) | `answer.webm` |
+| `audio/ogg` (Firefox) | `answer.ogg` |
+| `audio/mp4` (Safari) | `answer.m4a` |
+| `audio/wav`, `audio/mpeg`, `audio/flac` | `.wav`, `.mp3`, `.flac` |
+
+A codec suffix such as `;codecs=opus` is removed from the content type. Settings sent to Groq: the model, `language=en`, `temperature=0` and `response_format=verbose_json`.
+
+**Silence and made-up answers.** The first real runs showed Whisper answering "you", "Thank you." or "." for nearly silent audio. `verbose_json` returns per-segment `no_speech_prob` and `avg_logprob`, and the client raises `NoSpeechDetected` (never an answer) when:
+
+- the text has no letters or digits, or
+- every segment is clearly silent: `no_speech_prob` above 0.6 **and** `avg_logprob` below -1.0 (Whisper's own rule), or
+- the whole answer is a known filler ("you", "thank you", "thanks for watching", "thank you for watching", "bye") and the segment is not confident: `no_speech_prob` of 0.3 or more, or `avg_logprob` of -0.8 or less, or there is no segment information.
+
+A confident "thank you" and filler words inside a real answer are kept.
+
+**Measured on Groq (2026-11-26, `whisper-large-v3-turbo`, the four clips saved in Task 1):**
+
+| Clip | Whisper heard | `no_speech_prob` | `avg_logprob` | Result |
+|---|---|---|---|---|
+| 1, speech | the full question | 0 | -0.084 | kept |
+| 2, speech | the full question | 0 | -0.044 | kept |
+| 3, nearly silent | "." | 0 | -1.037 | refused: no words |
+| 4, nearly silent | "you" | 0 | -1.478 | refused: filler answer |
+
+- **`no_speech_prob` was 0 for every clip, silent ones included**, so on this model it carries no information, and the "every segment is silent" rule above will not fire. It stays in case another model (for example `whisper-large-v3`) reports it. The usable signal is `avg_logprob`: good speech sits near 0, and the two silent clips at -1.0 and -1.5. The -0.8 threshold of the filler rule falls between them with room on both sides.
+- **Four clips are a small sample.** Real microphone answers (Task 6 onwards) may include quiet but valid speech. Watch for good answers being refused (a very short answer such as "yes" or "thank you" at low confidence is the likeliest case), and adjust the constants in `speech_service.py` if so.
+
+**Errors.** Each cause has its own type, a short message that is safe to show (`str(error)`), a `detail` for logs, and the HTTP status the endpoint should use:
+
+| Error | When | Status |
+|---|---|---|
+| `SpeechAudioRejected` | empty, too large, unsupported or unreadable audio | 400, 413 or 415 |
+| `SpeechRateLimited` | Groq 429 (carries `retry_after`) | 429 |
+| `NoSpeechDetected` | silence, noise or a made-up filler answer (carries `audio_seconds`) | 422 |
+| `SpeechNotConfigured` | no `GROQ_API_KEY`, or Groq rejected it (401, 403) | 503 |
+| `SpeechUnavailable` | timeout, network failure, a server error or an unreadable reply | 503 |
+
+Messages and details never contain the API key or the audio, and Groq's own error text appears only in `detail`, with the key removed.
+
+**Audio length for the quota guard.** `Transcript.audio_seconds` is the longer of the end of Groq's last segment and the length the browser declared (ignored when it is not a sensible number; the endpoint caps it at the longest allowed recording). Both are needed: the segments end where the speech ends, so clip 4, a 7.6 s recording, had one segment ending at 0.5 s, while Groq bills the whole recording. On clip 1 and clip 2 the last segment's end matched the real length exactly (7.2 s and 8.08 s). Task 4 reserves the longest recording first and then calls `VoiceQuotaService.adjust` with this value.
+
+**A refused recording still used quota.** When Groq returns text that is then refused as `NoSpeechDetected`, Groq did process the audio. The error carries `audio_seconds`, and the endpoint must **adjust** the reservation with it, not release it (see the example in the quota section).
+
+**Privacy.** Audio stays in memory and is dropped after the call. Only sizes, status codes and timing are logged, never audio, transcripts or the key. The call is not an LLM call and is not traced in LangSmith. One shared connection pool serves all requests and is closed on shutdown with `close_speech_client()`.
+
 ## Privacy
 
 - Consent is asked before the first recording (Task 12). Without it the microphone button does not appear.
@@ -151,7 +223,7 @@ Every denial carries a friendly message that points the candidate to typing, and
 | Task | What | Depends on this page for |
 |---|---|---|
 | 2 | Quota and cost guard (Redis) — **done** | Per-user and organisation-wide caps |
-| 3 | `speech_service.py`, Whisper client | Model, formats, 25 MB free-plan file limit, `language` hint |
+| 3 | `speech_service.py`, Whisper client — **done** | Model, formats, 25 MB free-plan file limit, `language` hint |
 | 4 | `POST /api/candidate/interview/{id}/transcribe` | Flow above, audio never stored |
 | 5 | `POST …/speak` with cache | Orpheus limits, 200-character chunks, WAV only |
 | 6 | `useVoiceRecorder` hook | Click to start/stop, timer, maximum length |
@@ -212,6 +284,7 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 6. **Browser voices.** Quality and availability differ by operating system; check in Task 15.
 7. **Rolling windows.** Groq's limits refill continuously, but the guard counts in fixed UTC windows with caps at 50% of the limits. Check the Groq console after a heavy day that the margin was enough, and lower the caps if Groq ever answers 429 before the guard does.
 8. **Model retirement (R3).** Groq retires models every few months; model names are settings, and the measuring script is the quick check after a change.
+9. **Silence thresholds on real answers.** The filler rule's -0.8 threshold sits between good speech (-0.04, -0.08) and the two silent clips (-1.04, -1.48), but only four clips back it, all synthetic. `no_speech_prob` is always 0 on `whisper-large-v3-turbo`. Check with real microphone recordings (Task 6 onwards and the Task 16 voice evaluation set), and look especially for short, quiet but valid answers being refused.
 
 ## Sources (read 2026-11-25)
 
@@ -225,3 +298,4 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 - 2026-11-25: First version. Free-tier voice stack chosen.
 - 2026-11-25: Measured numbers added. Orpheus costs one token per character, and half its clips were nearly silent; the Orpheus terms must be accepted in the Groq console before first use (done for this organisation).
 - 2026-11-26: Task 2 added the quota and cost guard (`voice_quota_service.py`) and the `VOICE_*` quota settings.
+- 2026-11-26: Task 3 added the speech-to-text client (`speech_service.py`) with the silence and filler filter. Checked against real Groq output for the four saved clips: audio length is the longer of the last segment's end and the declared length; a refused recording carries its length so quota is adjusted, not released.
