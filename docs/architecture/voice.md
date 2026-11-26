@@ -54,17 +54,89 @@ Candidate                Frontend                     Backend                   
    |                        |   or POST .../speak (Orpheus, cached by text hash)     |
 ```
 
-## Planned settings (added in Tasks 2–5)
+## Settings
 
-| Setting | Purpose | Default |
+Quota settings (added in Task 2, all optional, read from the environment; see `backend/.env.example`). Each default is at most 50% of the Groq free-tier limit it protects. A cap of 0 switches that kind of call off.
+
+| Setting | Default | Groq free limit |
 |---|---|---|
-| `VOICE_STT_MODEL` | Whisper model name | `whisper-large-v3-turbo` |
-| `VOICE_TTS_PROVIDER` | `browser` or `orpheus` | `browser` |
-| `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE` | Orpheus model and voice | `canopylabs/orpheus-v1-english`, `daniel` |
-| `VOICE_MAX_RECORDING_SECONDS` | Longest recording accepted | 120 |
-| `VOICE_USER_DAILY_*`, `VOICE_ORG_DAILY_*` | Daily caps, set well below the Groq limits | set in Task 2 |
+| `VOICE_ENABLED` | `true` (`false` switches all voice calls off) | — |
+| `VOICE_STT_MIN_BILLED_SECONDS` | 10 | Groq bills at least 10 s per request |
+| `VOICE_STT_USER_DAILY_REQUESTS` | 30 | — |
+| `VOICE_STT_USER_DAILY_SECONDS` | 900 | — |
+| `VOICE_STT_ORG_DAILY_REQUESTS` | 600 | 2,000 a day |
+| `VOICE_STT_ORG_DAILY_SECONDS` | 10,000 | 28,800 a day |
+| `VOICE_STT_ORG_HOURLY_SECONDS` | 3,000 | 7,200 an hour |
+| `VOICE_STT_ORG_MINUTE_REQUESTS` | 10 | 20 a minute |
+| `VOICE_TTS_USER_DAILY_CHARS` | 600 | — |
+| `VOICE_TTS_ORG_DAILY_CHARS` | 1,800 | 3,600 tokens a day (1 token = 1 character) |
+| `VOICE_TTS_ORG_DAILY_REQUESTS` | 50 | 100 a day |
+| `VOICE_TTS_ORG_MINUTE_CHARS` | 600 | 1,200 tokens a minute |
+| `VOICE_TTS_ORG_MINUTE_REQUESTS` | 5 | 10 a minute |
 
-Names may change when the tasks are built; this table is the starting point.
+A bad value (not a whole number, or negative) is ignored with a warning and the default stays.
+
+Planned settings, added with the tasks that use them:
+
+| Setting | Purpose | Default | Task |
+|---|---|---|---|
+| `VOICE_STT_MODEL` | Whisper model name | `whisper-large-v3-turbo` | 3 |
+| `VOICE_MAX_RECORDING_SECONDS` | Longest recording accepted | 120 | 4 |
+| `VOICE_TTS_PROVIDER` | `browser` or `orpheus` | `browser` | 5 |
+| `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE` | Orpheus model and voice | `canopylabs/orpheus-v1-english`, `daniel` | 5 |
+
+Names may change when the tasks are built.
+
+## Quota and cost guard (Task 2)
+
+`app/services/voice_quota_service.py` (`VoiceQuotaService`) gives the voice endpoints one place to ask "may I call Groq?". Groq's limits belong to the whole organisation, so one user, or one afternoon of testing, could otherwise use up the day for everybody. Orpheus is the tight one: about 3,600 characters a day.
+
+**How an endpoint uses it** (tasks 4 and 5):
+
+```python
+decision = await quota.reserve(STT, user_id, audio_seconds)   # or TTS with the text length
+if not decision.allowed:
+    raise HTTPException(decision.http_status, decision.message)   # "type instead"
+try:
+    result = await call_groq(...)
+except GroqRateLimited as exc:
+    await quota.release(decision.reservation)
+    await quota.record_rate_limited(STT, exc.retry_after)
+    raise
+except Exception:
+    await quota.release(decision.reservation)     # the call never used Groq's quota
+    raise
+await quota.adjust(decision.reservation, real_audio_seconds)  # correct to the real length
+```
+
+**What is counted.** A reservation adds to every counter at once; if any counter would go over its cap, all of them are rolled back, so a denied call never uses anything.
+
+| Kind | Counters |
+|---|---|
+| Speech to text | per user per day: requests, audio seconds. Organisation per day: requests, audio seconds. Organisation per hour: audio seconds. Organisation per minute: requests |
+| Text to speech | per user per day: characters. Organisation per day: characters, requests. Organisation per minute: characters, requests |
+
+Audio is counted at a 10 s minimum per request. The endpoint reserves the longest recording first and then calls `adjust` with the real length, so a short answer does not use the whole reservation.
+
+**Why a call can be denied.**
+
+| Reason | Meaning | HTTP |
+|---|---|---|
+| `user_daily` | This user has used today's allowance | 429 |
+| `org_daily`, `org_hourly`, `org_minute` | The organisation's allowance is used for that window | 429 |
+| `cooldown` | Groq answered 429 and said when to come back | 429 |
+| `disabled` | `VOICE_ENABLED=false` | 503 |
+| `unavailable` | Redis could not be reached | 503 |
+
+Every denial carries a friendly message that points the candidate to typing, and (except `disabled` and `unavailable`) the seconds until the call could be allowed again.
+
+**Design choices.**
+
+- **Fixed UTC windows, plus a cool-down.** Groq's own windows are rolling (the response headers showed the daily request limit refilling one request every 14.4 minutes), so a fixed window can let through up to twice a cap across a boundary. The caps are at most 50% of Groq's limits for that reason. When Groq still returns 429, `record_rate_limited` blocks that kind of call for the whole organisation for Groq's `retry-after` time (60 s if missing, 1 hour at most).
+- **Fail closed.** If Redis is down the call is denied as `unavailable`. Voice is optional and typing always works, so a failure must not spend quota unchecked. The guard never raises for Redis problems.
+- **Keys hold no content.** A key is `voice:<kind>:<user or org>:<window>:<time bucket>:<requests or units>`, for example `voice:tts:org:day:20261126:units`. Keys expire a minute after their window ends. Text and audio are never stored.
+- **`remaining(kind, user_id)`** returns how much this user can still use, the lowest of their own and the organisation's room, for the interview screen to show later.
+- **Browser speech needs no quota** because it runs on the device.
 
 ## Privacy
 
@@ -78,7 +150,7 @@ Names may change when the tasks are built; this table is the starting point.
 
 | Task | What | Depends on this page for |
 |---|---|---|
-| 2 | Quota and cost guard (Redis) | Per-user and organisation-wide caps |
+| 2 | Quota and cost guard (Redis) — **done** | Per-user and organisation-wide caps |
 | 3 | `speech_service.py`, Whisper client | Model, formats, 25 MB free-plan file limit, `language` hint |
 | 4 | `POST /api/candidate/interview/{id}/transcribe` | Flow above, audio never stored |
 | 5 | `POST …/speak` with cache | Orpheus limits, 200-character chunks, WAV only |
@@ -138,7 +210,8 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 4. **Word timestamps.** Test on real speech in Task 10 or Task 16. The Groq documentation contradicts itself on whether `timestamp_granularities` needs `verbose_json`; the script asks for both.
 5. **Browser speech recognition.** Which browsers support it, and where the audio is processed. Verify before offering it as a fallback.
 6. **Browser voices.** Quality and availability differ by operating system; check in Task 15.
-7. **Model retirement (R3).** Groq retires models every few months; model names are settings, and the measuring script is the quick check after a change.
+7. **Rolling windows.** Groq's limits refill continuously, but the guard counts in fixed UTC windows with caps at 50% of the limits. Check the Groq console after a heavy day that the margin was enough, and lower the caps if Groq ever answers 429 before the guard does.
+8. **Model retirement (R3).** Groq retires models every few months; model names are settings, and the measuring script is the quick check after a change.
 
 ## Sources (read 2026-11-25)
 
@@ -151,3 +224,4 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 
 - 2026-11-25: First version. Free-tier voice stack chosen.
 - 2026-11-25: Measured numbers added. Orpheus costs one token per character, and half its clips were nearly silent; the Orpheus terms must be accepted in the Groq console before first use (done for this organisation).
+- 2026-11-26: Task 2 added the quota and cost guard (`voice_quota_service.py`) and the `VOICE_*` quota settings.
