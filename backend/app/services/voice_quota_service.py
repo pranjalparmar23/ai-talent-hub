@@ -8,6 +8,8 @@ of testing could use the day's allowance for everybody.
 How it is used (tasks 4 and 5 wire it into the endpoints):
 
     decision = await quota.reserve(STT, user_id, audio_seconds)
+    # Text to speech sends one Groq request per chunk of text, so it reserves with
+    # requests=<number of chunks>, and adjusts to what was really sent and charged.
     if not decision.allowed:
         raise HTTPException(decision.http_status, decision.message)   # type instead
     try:
@@ -191,6 +193,7 @@ class Reservation:
     units: int
     entries: list[_Entry] = field(default_factory=list)
     closed: bool = False
+    requests: int = 1  # Groq requests this call makes (text to speech sends several)
 
 
 @dataclass(frozen=True)
@@ -250,6 +253,11 @@ def _key(
     return f"voice:{kind}:{who}:{window}:{_bucket(window, now)}:{metric}"
 
 
+def _check_requests(requests: object, name: str = "requests") -> None:
+    if isinstance(requests, bool) or not isinstance(requests, int) or requests < 1:
+        raise ValueError(f"{name} must be a whole number, 1 or more")
+
+
 def _check_kind(kind: str) -> None:
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}, not {kind!r}")
@@ -278,38 +286,62 @@ class VoiceQuotaService:
 
     # ── Public API ─────────────────────────────────────────────────────────
 
-    async def reserve(self, kind: str, user_id: object, units: float) -> Decision:
-        """Ask for room for one call and take it. Never raises for Redis problems."""
+    async def reserve(
+        self, kind: str, user_id: object, units: float, *, requests: int = 1
+    ) -> Decision:
+        """Ask for room for one call and take it. Never raises for Redis problems.
+
+        `requests` is how many Groq requests the call makes. It is 1 for speech to
+        text; text to speech sends one request for each 200-character chunk, and
+        Groq counts each one against its per-minute and daily request limits.
+        """
         _check_kind(kind)
         uid = _safe_id(user_id)
         billed = self._billed(kind, units)
+        _check_requests(requests)
         if not self.limits.enabled:
             return Decision(False, DISABLED)
         try:
             wait = await self._cooldown_left(kind)
             if wait > 0:
                 return Decision(False, COOLDOWN, wait)
-            return await self._take(kind, uid, billed)
+            return await self._take(kind, uid, billed, requests)
         except Exception as exc:  # Redis down, timeout, ...
             logger.warning("Voice quota unavailable (%s)", type(exc).__name__)
             return Decision(False, UNAVAILABLE)
 
     async def adjust(
-        self, reservation: Reservation | None, actual_units: float
+        self,
+        reservation: Reservation | None,
+        actual_units: float,
+        *,
+        actual_requests: int | None = None,
     ) -> None:
-        """Replace the reserved amount with the real one (e.g. the real audio length)."""
+        """Replace the reserved amount with the real one (e.g. the real audio length).
+
+        `actual_requests` does the same for the number of Groq requests; leave it out
+        to keep the reserved number.
+        """
+        if actual_requests is not None:
+            _check_requests(actual_requests, "actual_requests")
         if reservation is None or reservation.closed:
             return
         actual = self._billed(reservation.kind, actual_units)
-        difference = actual - reservation.units
-        if difference == 0:
+        wanted = reservation.requests if actual_requests is None else actual_requests
+        changes = {
+            "units": actual - reservation.units,
+            "requests": wanted - reservation.requests,
+        }
+        if not any(changes.values()):
             return
         try:
             for entry in reservation.entries:
-                if entry.metric == "units":
+                difference = changes[entry.metric]
+                if difference:
                     await self.client.incrby(entry.key, difference)
                     entry.delta += difference
             reservation.units = actual
+            reservation.requests = wanted
         except Exception as exc:
             logger.warning("Voice quota adjust failed (%s)", type(exc).__name__)
 
@@ -376,12 +408,12 @@ class VoiceQuotaService:
         ttl = await self.client.ttl(f"voice:cooldown:{kind}")
         return int(ttl) if ttl and ttl > 0 else 0
 
-    async def _take(self, kind: str, uid: str, billed: int) -> Decision:
+    async def _take(self, kind: str, uid: str, billed: int, requests: int) -> Decision:
         now = self.clock()
         taken: list[_Entry] = []
         try:
             for scope, window, metric, cap_name in _CHECKS[kind]:
-                delta = 1 if metric == "requests" else billed
+                delta = requests if metric == "requests" else billed
                 key = _key(kind, scope, uid, window, metric, now)
                 total = await self.client.incrby(key, delta)
                 taken.append(_Entry(key, delta, metric))
@@ -395,7 +427,9 @@ class VoiceQuotaService:
         except Exception:
             await self._undo(taken)
             raise
-        return Decision(True, reservation=Reservation(kind, billed, taken))
+        return Decision(
+            True, reservation=Reservation(kind, billed, taken, requests=requests)
+        )
 
     async def _undo(self, entries: list[_Entry]) -> None:
         for entry in entries:

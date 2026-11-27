@@ -332,6 +332,19 @@ class TranscribeResponse(BaseModel):
     remaining: Optional[VoiceRemaining] = None
 
 
+class SpeakRequest(BaseModel):
+    """POST /interview/{id}/speak: which interviewer question to read aloud.
+
+    The body is optional and carries no text: the server reads the question from the
+    caller's own interview, so this endpoint cannot be used to speak arbitrary text.
+    """
+
+    # Position of the question in the session's `messages` list (the list that
+    # GET /interview/{id} returns). It must be an interviewer message. Left out, the
+    # latest interviewer question is read.
+    message_index: Optional[int] = Field(default=None, ge=0, le=99, strict=True)
+
+
 class VoiceErrorDetail(BaseModel):
     """The `detail` of every failed voice call (it is an object here, not a string)."""
 

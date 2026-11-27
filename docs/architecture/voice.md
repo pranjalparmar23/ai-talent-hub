@@ -1,6 +1,6 @@
 # Voice interview architecture
 
-**Status:** decided 2026-11-25 (Phase 8, Task 1), numbers measured the same day. Implementation follows in Tasks 2–17 (Tasks 2–4 are done).
+**Status:** decided 2026-11-25 (Phase 8, Task 1), numbers measured the same day. Implementation follows in Tasks 2–17 (Tasks 2–5 are done).
 **Owner:** Dev Lead. **Related:** Decision D6 (speech stack), risks R3, R4, R11.
 
 This page records how the interview gets a voice, why, and which numbers the choice rests on. Everything runs on the **Groq free tier**; no paid service is used.
@@ -86,20 +86,24 @@ Speech-to-text settings (added in Tasks 3 and 4, optional):
 
 `GROQ_API_KEY` is the existing key; the client reads it when a call is made.
 
-Planned settings, added with the tasks that use them:
+Text-to-speech settings (added in Task 5, optional):
 
-| Setting | Purpose | Default | Task |
-|---|---|---|---|
-| `VOICE_TTS_PROVIDER` | `browser` or `orpheus` | `browser` | 5 |
-| `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE` | Orpheus model and voice | `canopylabs/orpheus-v1-english`, `daniel` | 5 |
+| Setting | Purpose | Default |
+|---|---|---|
+| `VOICE_TTS_PROVIDER` | Who reads questions aloud: `browser` (the browser's own voice) or `orpheus` (the `/speak` endpoint). Anything else is ignored with a warning and means `browser` | `browser` |
+| `VOICE_TTS_MODEL` | Orpheus model name | `canopylabs/orpheus-v1-english` |
+| `VOICE_TTS_VOICE` | Orpheus voice | `daniel` |
+| `VOICE_TTS_CACHE_SECONDS` | How long a made clip is kept for the next request | 259,200 (3 days) |
 
-Names may change when the tasks are built.
+With `browser`, `/speak` answers `503 tts_off` and the app never calls it. Switching to
+`orpheus` also needs the Orpheus terms accepted once in the Groq console (done for this
+organisation, 2026-11-25).
 
 ## Quota and cost guard (Task 2)
 
 `app/services/voice_quota_service.py` (`VoiceQuotaService`) gives the voice endpoints one place to ask "may I call Groq?". Groq's limits belong to the whole organisation, so one user, or one afternoon of testing, could otherwise use up the day for everybody. Orpheus is the tight one: about 3,600 characters a day.
 
-**How an endpoint uses it** (Task 4 does exactly this in `voice_service.py`; Task 5 will do the same for speaking):
+**How an endpoint uses it** (Task 4 does exactly this in `voice_service.py`; Task 5 does the same for speaking, with the difference described under "Several Groq requests in one reservation" below):
 
 ```python
 decision = await quota.reserve(STT, user_id, audio_seconds)   # or TTS with the text length
@@ -147,6 +151,7 @@ Every denial carries a friendly message that points the candidate to typing, and
 - **Fixed UTC windows, plus a cool-down.** Groq's own windows are rolling (the response headers showed the daily request limit refilling one request every 14.4 minutes), so a fixed window can let through up to twice a cap across a boundary. The caps are at most 50% of Groq's limits for that reason. When Groq still returns 429, `record_rate_limited` blocks that kind of call for the whole organisation for Groq's `retry-after` time (60 s if missing, 1 hour at most).
 - **Fail closed.** If Redis is down the call is denied as `unavailable`. Voice is optional and typing always works, so a failure must not spend quota unchecked. The guard never raises for Redis problems.
 - **Keys hold no content.** A key is `voice:<kind>:<user or org>:<window>:<time bucket>:<requests or units>`, for example `voice:tts:org:day:20261126:units`. Keys expire a minute after their window ends. Text and audio are never stored.
+- **Several Groq requests in one reservation.** Orpheus takes at most 200 characters per request, so one question can be two or three requests. `reserve(kind, user_id, units, requests=n)` counts all `n` against the request counters at once, and `adjust(reservation, units, actual_requests=m)` corrects both numbers when the call ends (for example when the second of three requests failed, `m` is 2). Speech to text always uses the default of one.
 - **`remaining(kind, user_id)`** returns how much this user can still use, the lowest of their own and the organisation's room, for the interview screen to show later.
 - **Browser speech needs no quota** because it runs on the device.
 
@@ -251,10 +256,72 @@ curl -s -X POST "http://localhost:8000/api/candidate/interview/$SID/transcribe" 
 
 A clip with speech returns the text and `remaining`; a nearly silent clip returns 422 `no_speech`. Counters can be read in Redis with `docker exec ath_redis redis-cli --scan --pattern 'voice:stt:*'`.
 
+## Speak endpoint (Task 5)
+
+`POST /api/candidate/interview/{session_id}/speak` reads one interviewer question aloud with Groq Orpheus. It exists for the optional Orpheus mode: the default is the browser's own voice, which needs no endpoint and no quota. The request and response are in `docs/api/api-reference.md`. The pieces:
+
+| File | Job |
+|---|---|
+| `app/services/wav_audio.py` | Reads Groq's WAV (placeholder length, extra `LIST` chunk), checks the clip for sound, joins clips, writes a correct WAV |
+| `app/services/tts_service.py` | Cleans and splits the text, calls Groq once per chunk, checks every clip |
+| `app/services/voice_cache.py` | Keeps made clips in Redis |
+| `app/services/voice_service.py` (`speak`) | Cache, quota guard, settlement, sharing of one call between identical requests |
+| `app/api/candidate_routes.py` | Sign-in, ownership, picks the question from the interview, returns the audio |
+
+**The text never comes from the request.** The body holds only an optional `message_index`. The route reads the interview the caller owns and takes the text of an interviewer message from it, so the endpoint cannot be used to make Orpheus say anything else, and a user cannot fetch or probe another user's questions.
+
+**Order of checks.** A refused call costs nothing:
+
+1. Signed in (401). The interview is the caller's (404) and still open (409).
+2. The message is an interviewer question (400 `not_a_question`, 404 `question_not_found`).
+3. `VOICE_TTS_PROVIDER` is `orpheus` (503 `tts_off`) and voice is on (503 `disabled`).
+4. The text is cleaned and split (400 or 413 `text_rejected`).
+5. **Cache.** A hit returns at once: no Groq call, no quota. It is served even when the user's allowance is used up or during a cool-down.
+6. **Quota** is reserved for the characters and for one request per chunk (429 or 503, with messages that point to reading the question on the screen).
+7. Orpheus is called, one request per chunk, and the reservation is settled:
+
+| Outcome | Quota | Cache | Answer |
+|---|---|---|---|
+| Clip made | adjusted to what Groq charged | stored | 200 |
+| Groq 429 before any chunk was answered | released, and the cool-down starts | — | 429 `rate_limited` |
+| Groq 429 after some chunks were answered | kept for those chunks and the failed request, and the cool-down starts | — | 429 `rate_limited` |
+| A chunk came back silent | kept: Groq charged it | not stored | 502 `silent_audio` |
+| Any other error before a chunk was answered | released | — | the error's status |
+| Any other error after some chunks were answered | kept for those chunks and the failed request | — | the error's status |
+| Anything unexpected | released | — | 500 |
+
+**Text preparation.** Links become "the link", markup (`*`, backticks, `_`, headings, bullets, tags) is removed, and square brackets are removed because Orpheus may read `[cheerful]` as a direction. A text with no letter or digit is refused. A cleaned question over 600 characters (the organisation's per-minute cap) is refused with 413. The text is split at sentence ends, then clause marks, then spaces, into chunks of at most 200 characters; nothing is dropped. The clips are joined with 0.15 s of silence between them.
+
+**Every clip is checked for sound.** Half of the measured Orpheus clips were nearly silent although their length, header and cost looked normal. A clip passes when at least 20% of its samples are above 1% of full scale. The four clips measured on 2026-11-25 sit at 0.65–0.67 (good) and 0.013–0.014 (silent), so the line has room on both sides, but four clips are a small sample (open items). A silent clip is never returned or cached.
+
+**No retries.** Plain `httpx`, one request per chunk, no retry: a retry would spend the 3,600 daily tokens behind the quota guard's back. A silent clip is also not retried automatically; the candidate sees the question on screen and the browser voice can read it.
+
+**Cache.** Key: `voice:tts:clip:` plus the SHA-256 of the model, the voice and the cleaned text, so no text and no user id is ever in a key, a log line or a counter. A different model or voice is a different clip, and question text that differs only in markup is the same clip. The value is the WAV as base64 text (the app's Redis client decodes every reply as text; about 470 KB for 7 s of speech), kept for `VOICE_TTS_CACHE_SECONDS`. Clips over 3 MiB are not stored. The cache **fails open**: if Redis is unavailable `get` is a miss and `set` does nothing, so speaking still works. The quota guard is the opposite and fails closed. The clip is the same for every user, so one candidate's clip serves everyone who gets the same question.
+
+**One call for identical requests.** If the same question is requested twice at once (a page that asks twice, or two candidates with the same question), the second request waits for the first. The Groq call runs as its own task: a candidate who leaves does not cancel it, so the quota is always settled and a clip that was paid for is cached. The request that waited reports `X-Voice-Cache: hit`.
+
+**One error shape**, as for `/transcribe`: `detail = {"code", "message", "retry_after"?}` and a `Retry-After` header when the wait is known. The browser can read `X-Voice-Cache` and `Retry-After` because `main.py` exposes them through CORS. The shared Groq client for speaking is closed on shutdown with `close_tts_client()`.
+
+**Privacy.** The question text goes to Groq (named in the consent text, Task 12). The audio is not about the candidate: it is the interviewer's question. It is kept in Redis for 3 days without any user id and nothing is written to disk or the database. The logs hold only outcome codes, counts and timing, never the question, the audio or the user id; tests check this.
+
+**Tests.** `test_wav_audio.py`, `test_tts_service.py`, `test_voice_cache.py`, `test_voice_quota_service.py` and `test_voice_service.py` cover each piece with fakes; `tests/unit/api/test_speak_routes.py` goes through the real app (sign-in, ownership, the optional body, headers, every error, CORS, the API page, shutdown). None uses the network or a key.
+
+**Manual check with real Groq** (set `VOICE_TTS_PROVIDER=orpheus` and restart the backend; an interview must be started; replace `$TOKEN` and `$SID`). One question of about 140 characters costs about 140 of the 3,600 daily Orpheus tokens, so run it only once or twice a day:
+
+```
+curl -s -D - -X POST "http://localhost:8000/api/candidate/interview/$SID/speak" \
+  -H "Authorization: Bearer $TOKEN" -o question.wav     # X-Voice-Cache: miss
+curl -s -D - -X POST "http://localhost:8000/api/candidate/interview/$SID/speak" \
+  -H "Authorization: Bearer $TOKEN" -o again.wav        # X-Voice-Cache: hit, no tokens used
+```
+
+Play `question.wav`; it should be audible and about 7 s long. Counters: `docker exec ath_redis redis-cli --scan --pattern 'voice:tts:*'`.
+
 ## Privacy
 
 - Consent is asked before the first recording (Task 12). Without it the microphone button does not appear.
 - Audio leaves the candidate's browser for our backend, and from there for Groq. Both steps are named in the consent text.
+- A spoken question made with Orpheus is the interviewer's question, not the candidate's voice. The question text is sent to Groq; the clip is cached in Redis for 3 days with no user id in the key (see the Speak endpoint section).
 - Browser speech synthesis runs on the device. Browser speech **recognition** is not used by default: support is uneven and some browsers send audio to the vendor's servers. Treat that as unverified until checked (open items).
 - The measurement script uses synthetic sentences only, saves no audio, and never writes the API key.
 - Monitoring (risk R11) must not log transcripts or audio; only sizes, durations, status codes and latency.
@@ -266,9 +333,9 @@ A clip with speech returns the text and `remaining`; a nearly silent clip return
 | 2 | Quota and cost guard (Redis) — **done** | Per-user and organisation-wide caps |
 | 3 | `speech_service.py`, Whisper client — **done** | Model, formats, 25 MB free-plan file limit, `language` hint |
 | 4 | `POST /api/candidate/interview/{id}/transcribe` — **done** | Flow above, audio never stored |
-| 5 | `POST …/speak` with cache | Orpheus limits, 200-character chunks, WAV only |
+| 5 | `POST …/speak` with cache — **done** | Orpheus limits, 200-character chunks, WAV only |
 | 6 | `useVoiceRecorder` hook | Click to start/stop, timer, maximum length |
-| 7 | `useSpeech` hook | Browser-first speaking, Orpheus fallback |
+| 7 | `useSpeech` hook | Browser-first speaking; calls `/speak` only when the server uses Orpheus, and falls back to the browser voice on any error |
 | 8 | Voice controls in `InterviewChat` | Editable transcript before sending |
 | 9 | Hands-free / voice activity detection | After the basic flow works |
 | 10–11 | Delivery metrics and feedback card | Transcript only; audio is not kept |
@@ -317,7 +384,7 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 
 ## Open items
 
-1. **Orpheus reliability.** Two of four clips were nearly silent in each of the two complete runs, and sentence 4 failed both times. Not enough runs to say whether it depends on the text, the voice or the time of day. Task 5 must check every clip for sound before using it.
+1. **Orpheus reliability.** Two of four clips were nearly silent in each of the two complete runs, and sentence 4 failed both times. Not enough runs to say whether it depends on the text, the voice or the time of day. Task 5 checks every clip for sound, but the first real run of `/speak` is still to be done: see how often `silent_audio` comes back, and whether the 20% line is right for real questions (it was set from four clips). With only ~25 questions a day, a silent clip wastes a lot, so the browser voice stays the default.
 2. **Daily token total.** Confirm on the Groq console usage page that tokens match characters (about 550 per run).
 3. **Free plan versus developer values.** The limits page heading is ambiguous; the 100 requests a day and 1,200 tokens a minute seen in the response headers match the free-plan numbers above.
 4. **Word timestamps.** Test on real speech in Task 10 or Task 16. The Groq documentation contradicts itself on whether `timestamp_granularities` needs `verbose_json`; the script asks for both.
@@ -326,6 +393,8 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 7. **Rolling windows.** Groq's limits refill continuously, but the guard counts in fixed UTC windows with caps at 50% of the limits. Check the Groq console after a heavy day that the margin was enough, and lower the caps if Groq ever answers 429 before the guard does.
 8. **Model retirement (R3).** Groq retires models every few months; model names are settings, and the measuring script is the quick check after a change.
 9. **Silence thresholds on real answers.** The filler rule's -0.8 threshold sits between good speech (-0.04, -0.08) and the two silent clips (-1.04, -1.48), but only four clips back it, all synthetic. `no_speech_prob` is always 0 on `whisper-large-v3-turbo`. Check with real microphone recordings (Task 6 onwards and the Task 16 voice evaluation set), and look especially for short, quiet but valid answers being refused.
+10. **Redis memory for cached clips.** A clip is about 470 KB as base64, so a day of Orpheus (about 25 questions) is roughly 12 MB, and 3 days of expiry keeps up to about 35 MB. Check the Redis `maxmemory` and eviction policy of the real deployment; the cache fails open, but the interview history in Redis must not be evicted for it.
+11. **Header exposure.** `X-Voice-Cache` and `Retry-After` are exposed through CORS for the app on :5173. If the frontend is later served through a proxy on the same origin this is harmless, and if a proxy strips unknown headers check it.
 
 ## Sources (read 2026-11-25)
 
@@ -340,4 +409,5 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 - 2026-11-25: Measured numbers added. Orpheus costs one token per character, and half its clips were nearly silent; the Orpheus terms must be accepted in the Groq console before first use (done for this organisation).
 - 2026-11-26: Task 2 added the quota and cost guard (`voice_quota_service.py`) and the `VOICE_*` quota settings.
 - 2026-11-26: Task 3 added the speech-to-text client (`speech_service.py`) with the silence and filler filter. Checked against real Groq output for the four saved clips: audio length is the longer of the last segment's end and the declared length; a refused recording carries its length so quota is adjusted, not released.
+- 2026-11-27: Task 5 added `POST /api/candidate/interview/{id}/speak` (Orpheus text to speech): `wav_audio.py` (Groq's placeholder WAV length, sound check, joining), `tts_service.py` (clean, split at 200 characters, one request per chunk, no retries), `voice_cache.py` (Redis, fail-open), `VoiceService.speak`, the route, the `VOICE_TTS_*` settings, quota reservations of several requests, and `close_tts_client()` on shutdown. The question text comes from the caller's own interview, never from the request. `X-Voice-Cache` and `Retry-After` are exposed through CORS.
 - 2026-11-27: Task 4 added `POST /api/candidate/interview/{id}/transcribe` (`voice_service.py`, the route, the `VOICE_MAX_RECORDING_SECONDS` setting and the voice response schemas). The audio is the raw request body, not a multipart upload, so nothing is spooled to disk; every error of the endpoint has one `{code, message, retry_after?}` body; the shared speech client is closed on shutdown.

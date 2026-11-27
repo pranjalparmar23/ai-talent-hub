@@ -12,6 +12,7 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -32,6 +33,7 @@ from app.database.schemas import (
     ResumeSummary,
     ResumeUploadResponse,
     SkillGapResponse,
+    SpeakRequest,
     TranscribeResponse,
     VoiceErrorResponse,
 )
@@ -233,9 +235,11 @@ async def get_interview_feedback(
 
 # ═════════════════════════════════════════════════════════════════════════════
 # VOICE (Phase 8)
-# The browser records an answer, sends it here, and gets text back to edit and then
-# send through /respond. The audio is read, sent to Groq and dropped: it is never
-# written to disk or the database.
+# Listening: the browser records an answer, sends it here, and gets text back to edit
+# and then send through /respond. The audio is read, sent to Groq and dropped: it is
+# never written to disk or the database.
+# Speaking: the browser asks for one of the interviewer's questions as audio. The
+# question is read from the caller's own interview, never from the request.
 # ═════════════════════════════════════════════════════════════════════════════
 
 _AUDIO_TYPES = (
@@ -365,3 +369,111 @@ async def transcribe_interview_answer(
         declared,
     )
     return TranscribeResponse(**result)
+
+
+_SPEAK_ERRORS = {
+    400: {"model": VoiceErrorResponse, "description": "Not an interviewer question"},
+    404: {
+        "model": VoiceErrorResponse,
+        "description": "Not your interview, or no such question",
+    },
+    409: {"model": VoiceErrorResponse, "description": "Interview already complete"},
+    413: {
+        "model": VoiceErrorResponse,
+        "description": "Question too long to read aloud",
+    },
+    429: {"model": VoiceErrorResponse, "description": "Voice limit reached, or busy"},
+    502: {
+        "model": VoiceErrorResponse,
+        "description": "The spoken clip came out silent",
+    },
+    503: {
+        "model": VoiceErrorResponse,
+        "description": "Spoken questions off or unavailable",
+    },
+}
+
+_SPEAK_OK = {
+    "description": "The question as a WAV file",
+    "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}},
+    "headers": {
+        "X-Voice-Cache": {
+            "description": "hit: no new Groq call was made for this request; "
+            "miss: the clip was just made",
+            "schema": {"type": "string", "enum": ["hit", "miss"]},
+        }
+    },
+}
+
+
+def _question_to_read(messages: list[dict], index: int | None) -> str:
+    """The text of the interviewer question to speak: the one at `index` in the
+    session's messages, or the latest interviewer question when `index` is None."""
+    if index is None:
+        for message in reversed(messages):
+            if message.get("role") == "interviewer":
+                return message.get("content") or ""
+    elif index < len(messages):
+        message = messages[index]
+        if message.get("role") != "interviewer":
+            raise _voice_error(
+                status.HTTP_400_BAD_REQUEST,
+                "not_a_question",
+                "Only the interviewer's questions can be read aloud.",
+            )
+        return message.get("content") or ""
+    raise _voice_error(
+        status.HTTP_404_NOT_FOUND,
+        "question_not_found",
+        "There is no such question in this interview.",
+    )
+
+
+@router.post(
+    "/interview/{session_id}/speak",
+    response_class=Response,
+    responses={200: _SPEAK_OK, **_SPEAK_ERRORS},
+)
+async def speak_interview_question(
+    session_id: str,
+    body: SpeakRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+    interview_service: InterviewService = Depends(InterviewService),
+    voice_service: VoiceService = Depends(VoiceService),
+):
+    """Read one interviewer question aloud (Orpheus). Send no body to hear the latest
+    question, or {"message_index": n} for the message at position n of the session.
+
+    Only available when the server uses Orpheus (VOICE_TTS_PROVIDER=orpheus); the
+    app otherwise reads questions with the browser's own voice and never calls this.
+    """
+    try:
+        session = await interview_service.get_session(session_id, current_user["id"])
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise _voice_error(
+                status.HTTP_404_NOT_FOUND,
+                "not_found",
+                "Interview session not found.",
+            ) from exc
+        raise
+    if session["session_complete"]:
+        raise _voice_error(
+            status.HTTP_409_CONFLICT,
+            "interview_complete",
+            "This interview is already complete — view your feedback.",
+        )
+
+    index = body.message_index if body else None
+    text = _question_to_read(session["messages"], index)
+
+    spoken = await voice_service.speak(current_user["id"], text)
+    return Response(
+        content=spoken["audio"],
+        media_type="audio/wav",
+        headers={
+            "X-Voice-Cache": spoken["cache"],
+            # The audio is a private question; the app keeps its own copy in memory.
+            "Cache-Control": "private, no-store",
+        },
+    )

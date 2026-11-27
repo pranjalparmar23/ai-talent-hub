@@ -12,6 +12,7 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.database.postgres import init_db
 from app.services.speech_service import close_speech_client
+from app.services.tts_service import close_tts_client
 import os
 
 
@@ -21,12 +22,16 @@ async def lifespan(app: FastAPI):
     # Startup: create tables if they don't exist (dev convenience; production uses Alembic)
     await init_db()
     yield
-    # Shutdown: close the shared connection pool used for Groq speech-to-text
-    await close_speech_client()
+    # Shutdown: close the shared connection pools used for Groq (speech to text and
+    # text to speech). One failing to close must not leave the other open.
+    try:
+        await close_speech_client()
+    finally:
+        await close_tts_client()
 
 
 app = FastAPI(
-    title="AI Talent Hub",
+    title="AI Recruitment and Multi - Agent Interview Preparation Platform",
     description="AI-powered recruitment and career development platform",
     version="1.0.0",
     docs_url="/api/docs",
@@ -46,6 +51,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Headers that the browser may read from a cross-origin response (the app on :5173
+    # calls the API on :8000): whether a spoken question came from the cache, and how
+    # long to wait after "too many requests".
+    expose_headers=["X-Voice-Cache", "Retry-After"],
 )
 
 # ── Routes ───────────────────────────────────────────────────
@@ -65,4 +74,7 @@ async def health_check():
 @app.get("/", tags=["system"])
 async def root():
     """Root endpoint — redirects to docs."""
-    return {"message": "AI Talent Hub API", "docs": "/api/docs"}
+    return {
+        "message": "AI Recruitment and Multi - Agent Interview Preparation Platform",
+        "docs": "/api/docs",
+    }
