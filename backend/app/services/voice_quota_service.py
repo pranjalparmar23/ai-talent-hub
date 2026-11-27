@@ -98,6 +98,9 @@ _MESSAGES = {
 class VoiceLimits:
     """Caps for one day, hour or minute. A cap of 0 switches that kind of call off.
 
+    `max_recording_seconds` is not a quota but the longest answer the speech-to-text
+    endpoint accepts; it sits here so that every VOICE_* number is read in one place.
+
     Defaults are at most 50% of the Groq free-tier limits read on 2026-11-25:
     Whisper 2,000 requests, 28,800 audio seconds a day, 7,200 audio seconds an hour,
     20 requests a minute; Orpheus 100 requests, 3,600 tokens a day, 1,200 tokens and
@@ -106,6 +109,7 @@ class VoiceLimits:
 
     enabled: bool = True
     stt_min_billed_seconds: int = 10  # Groq bills at least 10 s per request
+    max_recording_seconds: int = 120  # longest recording the endpoint accepts
     stt_user_daily_requests: int = 30
     stt_user_daily_seconds: int = 900
     stt_org_daily_requests: int = 600

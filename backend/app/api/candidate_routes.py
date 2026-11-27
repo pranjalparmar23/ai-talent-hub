@@ -5,7 +5,16 @@ Route handlers stay thin — they validate input, load DB rows, delegate to serv
 or graphs, and return typed responses.
 """
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 
 from app.database.schemas import (
     ATSScoreResponse,
@@ -23,12 +32,15 @@ from app.database.schemas import (
     ResumeSummary,
     ResumeUploadResponse,
     SkillGapResponse,
+    TranscribeResponse,
+    VoiceErrorResponse,
 )
 from app.graphs.candidate_graph import CandidateGraph
 from app.middleware.auth import get_current_user
 from app.services.jd_service import JDService
 from app.services.resume_service import ResumeService
 from app.services.interview_service import InterviewService
+from app.services.voice_service import VoiceService
 
 router = APIRouter()
 
@@ -217,3 +229,139 @@ async def get_interview_feedback(
     interview_service: InterviewService = Depends(InterviewService),
 ):
     return await interview_service.generate_feedback(session_id, current_user["id"])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# VOICE (Phase 8)
+# The browser records an answer, sends it here, and gets text back to edit and then
+# send through /respond. The audio is read, sent to Groq and dropped: it is never
+# written to disk or the database.
+# ═════════════════════════════════════════════════════════════════════════════
+
+_AUDIO_TYPES = (
+    "audio/webm",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/flac",
+)
+
+_TRANSCRIBE_ERRORS = {
+    400: {"model": VoiceErrorResponse, "description": "No audio, or unreadable audio"},
+    404: {"model": VoiceErrorResponse, "description": "Not your interview"},
+    409: {"model": VoiceErrorResponse, "description": "Interview already complete"},
+    413: {"model": VoiceErrorResponse, "description": "Recording too large or long"},
+    415: {"model": VoiceErrorResponse, "description": "Recording format not supported"},
+    422: {"model": VoiceErrorResponse, "description": "No speech was heard"},
+    429: {"model": VoiceErrorResponse, "description": "Voice limit reached, or busy"},
+    503: {"model": VoiceErrorResponse, "description": "Voice off or unavailable"},
+}
+
+
+def _voice_error(status_code: int, code: str, message: str) -> HTTPException:
+    """Same error body as VoiceService: detail is {"code", "message"}."""
+    return HTTPException(status_code, detail={"code": code, "message": message})
+
+
+def _too_large() -> HTTPException:
+    return _voice_error(
+        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        "audio_rejected",
+        "That recording is too long. Please keep your answer shorter.",
+    )
+
+
+async def _read_audio(request: Request, limit: int) -> bytes:
+    """Read the request body, refusing to hold more than `limit` bytes.
+
+    The audio is the raw request body (not a multipart upload), so nothing is spooled
+    to a temporary file. An honest Content-Length is refused before reading anything;
+    a missing or false one is caught while the body streams in.
+    """
+    try:
+        announced = int(request.headers.get("content-length", ""))
+    except ValueError:
+        announced = None
+    if announced is not None and announced > limit:
+        raise _too_large()
+
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise _too_large()
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post(
+    "/interview/{session_id}/transcribe",
+    response_model=TranscribeResponse,
+    responses=_TRANSCRIBE_ERRORS,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "description": "The recording itself, as the raw request body. Send its "
+            "type (for example audio/webm) as Content-Type.",
+            "content": {
+                kind: {"schema": {"type": "string", "format": "binary"}}
+                for kind in _AUDIO_TYPES
+            },
+        }
+    },
+)
+async def transcribe_interview_answer(
+    session_id: str,
+    request: Request,
+    x_audio_duration: str | None = Header(
+        default=None,
+        description="Length of the recording in seconds, as the browser measured it. "
+        "Optional; used to reserve the right amount of the voice limit.",
+    ),
+    current_user: dict = Depends(get_current_user),
+    interview_service: InterviewService = Depends(InterviewService),
+    voice_service: VoiceService = Depends(VoiceService),
+):
+    """Turn one spoken answer into text. The text is not saved or sent to the
+    interviewer: the candidate edits it and sends it through /respond."""
+    # Ownership and "still open" come first, so nobody else's session, and no
+    # finished one, makes us read or send audio.
+    try:
+        session = await interview_service.get_session(session_id, current_user["id"])
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise _voice_error(
+                status.HTTP_404_NOT_FOUND,
+                "not_found",
+                "Interview session not found.",
+            ) from exc
+        raise
+    if session["session_complete"]:
+        raise _voice_error(
+            status.HTTP_409_CONFLICT,
+            "interview_complete",
+            "This interview is already complete — view your feedback.",
+        )
+
+    audio = await _read_audio(request, voice_service.speech.max_audio_bytes)
+    if not audio:
+        raise _voice_error(
+            status.HTTP_400_BAD_REQUEST,
+            "audio_rejected",
+            "No audio was received. Please try again.",
+        )
+
+    try:
+        declared = float(x_audio_duration) if x_audio_duration else None
+    except ValueError:
+        declared = None  # a bad number is ignored, not an error
+
+    result = await voice_service.transcribe_answer(
+        current_user["id"],
+        audio,
+        request.headers.get("content-type", ""),
+        declared,
+    )
+    return TranscribeResponse(**result)

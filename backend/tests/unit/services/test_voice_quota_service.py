@@ -150,6 +150,25 @@ class TestLimits:
         assert limits.stt_user_daily_seconds <= limits.stt_org_daily_seconds
         assert limits.tts_user_daily_chars <= limits.tts_org_daily_chars
 
+    def test_the_longest_recording_fits_every_speech_to_text_cap(self):
+        limits = VoiceLimits()
+
+        assert limits.max_recording_seconds == 120
+        assert limits.max_recording_seconds <= limits.stt_user_daily_seconds
+        assert limits.max_recording_seconds <= limits.stt_org_hourly_seconds
+        assert limits.max_recording_seconds >= limits.stt_min_billed_seconds
+
+    def test_the_longest_recording_comes_from_the_environment(self):
+        limits = VoiceLimits.from_env({"VOICE_MAX_RECORDING_SECONDS": "60"})
+
+        assert limits.max_recording_seconds == 60
+
+    @pytest.mark.parametrize("value", ["abc", "-1", "1.5"])
+    def test_a_bad_longest_recording_is_ignored(self, value):
+        limits = VoiceLimits.from_env({"VOICE_MAX_RECORDING_SECONDS": value})
+
+        assert limits.max_recording_seconds == 120
+
     def test_environment_overrides(self):
         limits = VoiceLimits.from_env(
             {"VOICE_TTS_ORG_DAILY_CHARS": "900", "VOICE_STT_USER_DAILY_REQUESTS": "5"}

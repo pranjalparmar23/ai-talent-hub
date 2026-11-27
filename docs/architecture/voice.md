@@ -1,6 +1,6 @@
 # Voice interview architecture
 
-**Status:** decided 2026-11-25 (Phase 8, Task 1), numbers measured the same day. Implementation follows in Tasks 2–17.
+**Status:** decided 2026-11-25 (Phase 8, Task 1), numbers measured the same day. Implementation follows in Tasks 2–17 (Tasks 2–4 are done).
 **Owner:** Dev Lead. **Related:** Decision D6 (speech stack), risks R3, R4, R11.
 
 This page records how the interview gets a voice, why, and which numbers the choice rests on. Everything runs on the **Groq free tier**; no paid service is used.
@@ -9,7 +9,7 @@ This page records how the interview gets a voice, why, and which numbers the cho
 
 | # | Topic | Decision |
 |---|---|---|
-| 1 | Interaction | **Click to start, click to stop.** A timer and a maximum length (planned: 120 s) are shown while recording. No hold-to-talk, no hands-free in the first release (hands-free is Task 9). |
+| 1 | Interaction | **Click to start, click to stop.** A timer and a maximum length (120 s, `VOICE_MAX_RECORDING_SECONDS`) are shown while recording. No hold-to-talk, no hands-free in the first release (hands-free is Task 9). |
 | 2 | Listening (speech to text) | **Groq Whisper, `whisper-large-v3-turbo`**, called by the backend. The model name is a setting, so a retirement is a one-line change. |
 | 3 | Speaking (text to speech) | **Browser `speechSynthesis` by default.** Groq Orpheus is an optional switch, capped by a daily budget, cached, and checked for empty audio (see Measured numbers). |
 | 4 | Fallbacks | Typing is always available while listening. If Whisper returns 429 or fails, the candidate sees a short message and keeps typing. If Orpheus returns 429, the browser voice speaks instead. |
@@ -42,7 +42,7 @@ Candidate                Frontend                     Backend                   
    | click "answer"         |                            |                            |
    |----------------------->| MediaRecorder starts       |                            |
    | click "stop"           |                            |                            |
-   |----------------------->| POST audio (multipart) --->| check consent + quota      |
+   |----------------------->| POST raw audio (body)  --->| check consent + quota      |
    |                        |    .../transcribe          | (Redis, per user + org)    |
    |                        |                            |--- POST audio/transcriptions -->|
    |                        |                            |<-- text -------------------|
@@ -76,12 +76,13 @@ Quota settings (added in Task 2, all optional, read from the environment; see `b
 
 A bad value (not a whole number, or negative) is ignored with a warning and the default stays.
 
-Speech-to-text client settings (added in Task 3, optional):
+Speech-to-text settings (added in Tasks 3 and 4, optional):
 
 | Setting | Purpose | Default |
 |---|---|---|
 | `VOICE_STT_MODEL` | Whisper model name (a retirement is a one-line change) | `whisper-large-v3-turbo` |
 | `VOICE_MAX_AUDIO_BYTES` | Largest recording accepted before any call is made | 10,485,760 (Groq's free-plan limit is 25 MB) |
+| `VOICE_MAX_RECORDING_SECONDS` | Longest answer accepted (Task 4); 0 switches speech to text off | 120 |
 
 `GROQ_API_KEY` is the existing key; the client reads it when a call is made.
 
@@ -89,7 +90,6 @@ Planned settings, added with the tasks that use them:
 
 | Setting | Purpose | Default | Task |
 |---|---|---|---|
-| `VOICE_MAX_RECORDING_SECONDS` | Longest recording accepted | 120 | 4 |
 | `VOICE_TTS_PROVIDER` | `browser` or `orpheus` | `browser` | 5 |
 | `VOICE_TTS_MODEL`, `VOICE_TTS_VOICE` | Orpheus model and voice | `canopylabs/orpheus-v1-english`, `daniel` | 5 |
 
@@ -99,7 +99,7 @@ Names may change when the tasks are built.
 
 `app/services/voice_quota_service.py` (`VoiceQuotaService`) gives the voice endpoints one place to ask "may I call Groq?". Groq's limits belong to the whole organisation, so one user, or one afternoon of testing, could otherwise use up the day for everybody. Orpheus is the tight one: about 3,600 characters a day.
 
-**How an endpoint uses it** (tasks 4 and 5):
+**How an endpoint uses it** (Task 4 does exactly this in `voice_service.py`; Task 5 will do the same for speaking):
 
 ```python
 decision = await quota.reserve(STT, user_id, audio_seconds)   # or TTS with the text length
@@ -152,7 +152,7 @@ Every denial carries a friendly message that points the candidate to typing, and
 
 ## Speech-to-text client (Task 3)
 
-`app/services/speech_service.py` (`SpeechService`) turns one recording into text with Groq Whisper. It has no endpoint of its own: Task 4 adds `POST …/transcribe`, asks the quota guard first, and calls this.
+`app/services/speech_service.py` (`SpeechService`) turns one recording into text with Groq Whisper. It has no endpoint of its own: `VoiceService` (Task 4) asks the quota guard first and then calls this.
 
 ```python
 transcript = await SpeechService().transcribe(audio_bytes, "audio/webm;codecs=opus", declared_seconds=31.2)
@@ -210,6 +210,47 @@ Messages and details never contain the API key or the audio, and Groq's own erro
 
 **Privacy.** Audio stays in memory and is dropped after the call. Only sizes, status codes and timing are logged, never audio, transcripts or the key. The call is not an LLM call and is not traced in LangSmith. One shared connection pool serves all requests and is closed on shutdown with `close_speech_client()`.
 
+## Transcribe endpoint (Task 4)
+
+`POST /api/candidate/interview/{session_id}/transcribe` turns one spoken answer into text. It is the only voice endpoint so far; the full request and response are in `docs/api/api-reference.md`. The route is in `app/api/candidate_routes.py`, the voice logic in `app/services/voice_service.py` (`VoiceService`), which sits between the route, the quota guard and the speech client.
+
+**The request is the audio itself.** The browser sends the recording as the raw request body, with its type (for example `audio/webm;codecs=opus`) as `Content-Type`, and optionally its length in seconds as `X-Audio-Duration`. It is not a multipart upload: as far as we know FastAPI's `UploadFile` writes files over 1 MB to a temporary file on disk, and the decision above is that audio is never written anywhere. The body is read in chunks and refused as soon as it passes `VOICE_MAX_AUDIO_BYTES`; a `Content-Length` over the limit is refused before any of the body is read.
+
+**Order of checks.** Each step happens only if the one before it passed, so a refused call costs nothing:
+
+1. Signed in (401).
+2. The interview is the caller's (404, which also covers an unknown or invalid id) and still open (409).
+3. The body is not empty (400) and not over the size limit (413).
+4. The declared length is not over the longest answer plus 2 s of grace (413 `too_long`).
+5. Quota is reserved for the declared length, or for the longest answer when none was declared (429 or 503).
+6. Groq Whisper is called, and the reservation is settled:
+
+| Outcome | Quota | Answer |
+|---|---|---|
+| Text returned | adjusted to the real audio length | 200 |
+| No speech detected | adjusted (Groq processed the audio) | 422 `no_speech` |
+| Groq 429 | released, and the organisation cool-down starts | 429 `rate_limited` with Groq's wait |
+| Any other speech error | released | the error's status |
+| Anything unexpected | released | 500 |
+
+**One error shape.** Every failure of this endpoint, including 404 and 409, has `detail = {"code", "message", "retry_after"?}` and, when the wait is known, a `Retry-After` header. The interview screen needs one handler and can show `message` as it is. The messages are short, safe to show, and point to typing. The only exceptions are the standard 401 (a plain-string `detail`) and a server error (500).
+
+**The text is only returned.** It is not saved and not sent to the interviewer. The candidate edits it and sends it through the existing `/respond`, so the interview logic and its history did not change.
+
+**Privacy.** The audio lives in memory for the length of the request. Nothing is written to disk, the database or Redis (the counters hold only numbers), and the logs hold only outcome codes. A test checks that neither the transcript nor the user id appears in the logs.
+
+**Tests.** `tests/unit/services/test_voice_service.py` covers the service on a fake Redis and a fake speech client. `tests/unit/api/test_transcribe_routes.py` goes through the real app (sign-in, ownership, body limits, every error code, the API page, shutdown). Neither uses the network. The first run against real Groq is the manual check below.
+
+**Manual check** (after logging in, with an interview started; replace `$TOKEN` and `$SID`):
+
+```
+curl -s -X POST "http://localhost:8000/api/candidate/interview/$SID/transcribe" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/wav" -H "X-Audio-Duration: 8" \
+  --data-binary @voice_audio_20261125T123407Z_2.wav
+```
+
+A clip with speech returns the text and `remaining`; a nearly silent clip returns 422 `no_speech`. Counters can be read in Redis with `docker exec ath_redis redis-cli --scan --pattern 'voice:stt:*'`.
+
 ## Privacy
 
 - Consent is asked before the first recording (Task 12). Without it the microphone button does not appear.
@@ -224,7 +265,7 @@ Messages and details never contain the API key or the audio, and Groq's own erro
 |---|---|---|
 | 2 | Quota and cost guard (Redis) — **done** | Per-user and organisation-wide caps |
 | 3 | `speech_service.py`, Whisper client — **done** | Model, formats, 25 MB free-plan file limit, `language` hint |
-| 4 | `POST /api/candidate/interview/{id}/transcribe` | Flow above, audio never stored |
+| 4 | `POST /api/candidate/interview/{id}/transcribe` — **done** | Flow above, audio never stored |
 | 5 | `POST …/speak` with cache | Orpheus limits, 200-character chunks, WAV only |
 | 6 | `useVoiceRecorder` hook | Click to start/stop, timer, maximum length |
 | 7 | `useSpeech` hook | Browser-first speaking, Orpheus fallback |
@@ -299,3 +340,4 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 - 2026-11-25: Measured numbers added. Orpheus costs one token per character, and half its clips were nearly silent; the Orpheus terms must be accepted in the Groq console before first use (done for this organisation).
 - 2026-11-26: Task 2 added the quota and cost guard (`voice_quota_service.py`) and the `VOICE_*` quota settings.
 - 2026-11-26: Task 3 added the speech-to-text client (`speech_service.py`) with the silence and filler filter. Checked against real Groq output for the four saved clips: audio length is the longer of the last segment's end and the declared length; a refused recording carries its length so quota is adjusted, not released.
+- 2026-11-27: Task 4 added `POST /api/candidate/interview/{id}/transcribe` (`voice_service.py`, the route, the `VOICE_MAX_RECORDING_SECONDS` setting and the voice response schemas). The audio is the raw request body, not a multipart upload, so nothing is spooled to disk; every error of the endpoint has one `{code, message, retry_after?}` body; the shared speech client is closed on shutdown.

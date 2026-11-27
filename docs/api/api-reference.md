@@ -7,7 +7,7 @@ who may call it, what it accepts and what it returns.
 > (path, method, role, request body, response shape, status code or error message)
 > must update this file **in the same commit**. See [Updating this file](#updating-this-file).
 
-Last reviewed: 2026-11-09 (Phase 6)
+Last reviewed: 2026-11-27 (Phase 8)
 
 ---
 
@@ -37,7 +37,7 @@ Last reviewed: 2026-11-09 (Phase 6)
 | Interactive docs (Swagger) | `/api/docs` |
 | ReDoc | `/api/redoc` |
 | OpenAPI JSON | `/openapi.json` |
-| Content type | JSON, except the login form and file uploads |
+| Content type | JSON, except the login form, file uploads and voice recordings (the raw audio is the request body) |
 | IDs | UUID strings |
 
 The interactive docs are generated from the code and are always the source of truth for
@@ -112,6 +112,10 @@ they expire. Token revocation and secret handling are planned for the security p
 { "detail": "Resume not found" }
 ```
 
+The voice endpoint `…/transcribe` is the one exception: its errors have an object as `detail`
+(`{"code", "message", "retry_after"?}`), described with that endpoint. A missing token on it is
+still the standard `401` with a plain-string `detail`.
+
 Request validation failures return `422` with `detail` as a list of field errors:
 
 ```json
@@ -128,10 +132,11 @@ Request validation failures return `422` with `detail` as a list of field errors
 | 403 | Wrong role |
 | 404 | Not found, **or not yours** (see below) |
 | 409 | Conflict (email already registered, interview already complete) |
-| 413 | Upload too large |
-| 415 | Unsupported file type (recruiter JD upload) |
-| 422 | Validation error, or a file with too little readable text |
-| 429 | Rate limit exceeded |
+| 413 | Upload too large, or a voice recording too large or too long |
+| 415 | Unsupported file type (recruiter JD upload), or an unsupported voice recording format |
+| 422 | Validation error, a file with too little readable text, or a recording with no speech in it |
+| 429 | Rate limit exceeded, or a voice limit reached (see `…/transcribe`) |
+| 503 | Voice is switched off, not set up or unavailable (`…/transcribe`) |
 
 **Ownership returns 404, not 403.** If a resource exists but belongs to someone else, the
 API answers `404`, so one user cannot tell whether another user's id exists. An invalid
@@ -145,6 +150,9 @@ API answers `404`, so one user cannot tell whether another user's id exists. An 
 | JD upload size | 5 MB (PDF, `.txt`, `.md`) | `POST /api/recruiter/jd/upload` |
 | Minimum text in an uploaded JD | 50 characters | `POST /api/recruiter/jd/upload` |
 | Interview length | 6 questions | Mock interview |
+| Voice recording length | 120 seconds (`VOICE_MAX_RECORDING_SECONDS`) | `POST /api/candidate/interview/{session_id}/transcribe` |
+| Voice recording size | 10 MiB (`VOICE_MAX_AUDIO_BYTES`) | `…/transcribe` |
+| Voice use per user | 30 recordings and 900 audio seconds a day (defaults; set in `backend/.env.example`) | `…/transcribe` |
 | Candidate pool scanned when ranking | newest 500 candidates | `rank-candidates` |
 | Rate limit | 100 requests / 60 s / IP | All routes |
 
@@ -370,7 +378,8 @@ Response (`LearningPlanResponse`):
 ### Mock interview
 
 A session has at most 6 questions. The flow is: start, then respond repeatedly, then
-fetch feedback.
+fetch feedback. A candidate who prefers to speak can send a recording to `…/transcribe`
+first, edit the text it returns, and send that text through `…/respond`.
 
 #### `POST /api/candidate/interview/start`
 
@@ -423,6 +432,71 @@ Errors:
 | 400 | `Response must not be empty.` |
 | 404 | `Interview session not found.` |
 | 409 | `This interview is already complete — view your feedback.` |
+
+#### `POST /api/candidate/interview/{session_id}/transcribe`
+
+Turns one spoken answer into text (Phase 8). The text is only returned: it is **not** saved
+and not sent to the interviewer. The candidate edits it and sends it through `…/respond`.
+The audio is never stored.
+
+Request: the recording itself as the **raw request body** (not multipart).
+
+| Header | Required | Notes |
+|---|---|---|
+| `Authorization` | yes | `Bearer <access token>` |
+| `Content-Type` | yes | The recording's type: `audio/webm` (a codec suffix such as `;codecs=opus` is fine), `audio/ogg`, `audio/mp4`, `audio/mpeg`, `audio/wav` or `audio/flac` |
+| `X-Audio-Duration` | no | Length in seconds as the browser measured it. Used to reserve the right amount of the voice limit. A value that is not a positive number is ignored |
+
+Response `200` (`TranscribeResponse`):
+
+```json
+{
+  "text": "I would start by checking the logs and the recent deploys.",
+  "audio_seconds": 8.08,
+  "remaining": { "requests": 9, "seconds": 890 }
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `text` | string | What was said. Never empty |
+| `audio_seconds` | number or null | Length of the recording as measured by the speech service |
+| `remaining` | object or null | What this user can still use now: the lowest of their own and the organisation's room (`requests`, `seconds`). `null` when the counters cannot be read; the text is still valid |
+
+Errors. Every one has `detail = {"code", "message"}`, plus `retry_after` (whole seconds) and a
+`Retry-After` header when the wait is known. `message` is short, safe to show, and points the
+candidate to typing.
+
+| Code | `detail.code` | When |
+|---|---|---|
+| 400 | `audio_rejected` | Empty body, or audio that could not be read |
+| 404 | `not_found` | Unknown or invalid id, **or not your interview** |
+| 409 | `interview_complete` | The interview is already complete |
+| 413 | `audio_rejected` | Body larger than `VOICE_MAX_AUDIO_BYTES` (checked from `Content-Length` before reading, or while it streams in) |
+| 413 | `too_long` | `X-Audio-Duration` is more than 2 seconds over the longest allowed answer (120 s) |
+| 415 | `audio_rejected` | Recording format not supported |
+| 422 | `no_speech` | Silence, noise or a made-up filler answer. The recording still counts against the limit, because Groq processed it |
+| 429 | `user_daily` | This user has used today's allowance |
+| 429 | `org_daily`, `org_hourly`, `org_minute` | The organisation's allowance is used for that window |
+| 429 | `rate_limited` | Groq is busy; `retry_after` is Groq's wait (60 s when it gave none) |
+| 429 | `cooldown` | Groq was busy a moment ago; calls wait without reaching it |
+| 503 | `disabled` | `VOICE_ENABLED=false`, or `VOICE_MAX_RECORDING_SECONDS=0` |
+| 503 | `unavailable` | Speech service down or timed out, or the limit counters could not be reached (the call is refused, not allowed unchecked) |
+| 503 | `not_configured` | No Groq key, or Groq rejected it |
+
+Notes:
+
+- Ownership and "still open" are checked before the audio is read, so another user's interview
+  and a finished one use no quota.
+- Refused calls (400, 404, 409, 413 and the limit errors) never reach Groq. A call that fails
+  at Groq for any reason other than "no speech" does not use the user's allowance.
+- Example (replace `$TOKEN` and `$SESSION_ID`):
+
+```
+curl -X POST "http://localhost:8000/api/candidate/interview/$SESSION_ID/transcribe" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/wav" -H "X-Audio-Duration: 8" \
+  --data-binary @answer.wav
+```
 
 #### `GET /api/candidate/interview/{session_id}/feedback`
 
@@ -612,6 +686,7 @@ See `docs/architecture/mcp.md` for the gateway design.
 | POST | `/api/candidate/interview/start` | Logged in | [6](#6-candidate-endpoints) |
 | GET | `/api/candidate/interview/{session_id}` | Logged in | [6](#6-candidate-endpoints) |
 | POST | `/api/candidate/interview/{session_id}/respond` | Logged in | [6](#6-candidate-endpoints) |
+| POST | `/api/candidate/interview/{session_id}/transcribe` | Logged in | [6](#6-candidate-endpoints) |
 | GET | `/api/candidate/interview/{session_id}/feedback` | Logged in | [6](#6-candidate-endpoints) |
 | POST | `/api/recruiter/jd/upload` | `recruiter` | [7](#7-recruiter-endpoints) |
 | GET | `/api/recruiter/jds` | `recruiter` | [7](#7-recruiter-endpoints) |
@@ -623,7 +698,7 @@ See `docs/architecture/mcp.md` for the gateway design.
 | DELETE | `/api/admin/users/{user_id}` | `admin` (stub) | [8](#8-admin-endpoints-stubs) |
 | GET | `/api/health/mcp` | Public | [9](#9-health-endpoints) |
 
-Total: 26 endpoints (3 of them admin stubs).
+Total: 28 endpoints (3 of them admin stubs).
 
 ---
 
@@ -633,6 +708,7 @@ Newest first. Add one line per API change.
 
 | Date | Phase | Change |
 |---|---|---|
+| 2026-11-27 | 8 | Added `POST /api/candidate/interview/{session_id}/transcribe` (voice answer to text; the index total is corrected to 28). Its errors use an object `detail` with a `code`. New 503 status and voice limits documented. |
 | 2026-11-09 | 6 | Added this reference. Documents all existing endpoints. |
 | Phase 6 | 6 | Added `GET /api/health/mcp` (MCP gateway health). |
 | Phase 5 | 5 | Added recruiter endpoints: JD upload, JD list, rank candidates, interview questions, hiring recommendation. |
@@ -657,7 +733,7 @@ Do this whenever an endpoint changes:
 3. **Removed endpoint:** delete its section and index row, and add a changelog row.
 4. **Always:** update "Last reviewed" at the top and the changelog.
 5. **Check against the code:** compare with the route file, the schema in
-   `backend/app/models/schemas.py` and the service that raises the errors. Copy error
+   `backend/app/database/schemas.py` and the service that raises the errors. Copy error
    messages exactly. If you are not sure of a value, check the code or `/api/docs`
    instead of guessing.
 6. **Same commit:** the doc change goes in the same commit as the code change, so a

@@ -11,6 +11,7 @@ from app.api import (
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.database.postgres import init_db
+from app.services.speech_service import close_speech_client
 import os
 
 
@@ -20,7 +21,8 @@ async def lifespan(app: FastAPI):
     # Startup: create tables if they don't exist (dev convenience; production uses Alembic)
     await init_db()
     yield
-    # Shutdown: nothing to clean up for now
+    # Shutdown: close the shared connection pool used for Groq speech-to-text
+    await close_speech_client()
 
 
 app = FastAPI(
