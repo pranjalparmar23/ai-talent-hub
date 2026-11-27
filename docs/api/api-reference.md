@@ -7,7 +7,7 @@ who may call it, what it accepts and what it returns.
 > (path, method, role, request body, response shape, status code or error message)
 > must update this file **in the same commit**. See [Updating this file](#updating-this-file).
 
-Last reviewed: 2026-11-27 (Phase 8)
+Last reviewed: 2026-11-27 (Phase 8, task 5)
 
 ---
 
@@ -57,7 +57,8 @@ error messages and limits.
 **Middleware (applies to every request)**
 
 - **CORS:** allowed origins come from `ALLOWED_ORIGINS` (default
-  `http://localhost:5173,http://localhost:3000`). Credentials are allowed.
+  `http://localhost:5173,http://localhost:3000`). Credentials are allowed. The browser
+  may read the `X-Voice-Cache` and `Retry-After` response headers.
 - **Rate limit:** 100 requests per 60 seconds per client IP, counted in memory per
   process. Over the limit returns `429 {"detail": "Rate limit exceeded"}`.
 - **Request logging:** method, path, status and duration are written to the
@@ -127,16 +128,17 @@ Request validation failures return `422` with `detail` as a list of field errors
 | Code | Meaning here |
 |---|---|
 | 200 / 201 | Success / created |
-| 400 | Bad input (empty file, wrong file type on candidate upload, empty text, nothing to score yet) |
+| 400 | Bad input (empty file, wrong file type on candidate upload, empty text, nothing to score yet, a message that is not a question to read aloud) |
 | 401 | Missing or invalid token, or bad login |
 | 403 | Wrong role |
 | 404 | Not found, **or not yours** (see below) |
 | 409 | Conflict (email already registered, interview already complete) |
-| 413 | Upload too large, or a voice recording too large or too long |
+| 413 | Upload too large, a voice recording too large or too long, or a question too long to read aloud |
 | 415 | Unsupported file type (recruiter JD upload), or an unsupported voice recording format |
 | 422 | Validation error, a file with too little readable text, or a recording with no speech in it |
-| 429 | Rate limit exceeded, or a voice limit reached (see `…/transcribe`) |
-| 503 | Voice is switched off, not set up or unavailable (`…/transcribe`) |
+| 429 | Rate limit exceeded, or a voice limit reached (see `…/transcribe` and `…/speak`) |
+| 502 | A spoken question came back silent (`…/speak`) |
+| 503 | Voice is switched off, not set up or unavailable (`…/transcribe`, `…/speak`) |
 
 **Ownership returns 404, not 403.** If a resource exists but belongs to someone else, the
 API answers `404`, so one user cannot tell whether another user's id exists. An invalid
@@ -153,6 +155,7 @@ API answers `404`, so one user cannot tell whether another user's id exists. An 
 | Voice recording length | 120 seconds (`VOICE_MAX_RECORDING_SECONDS`) | `POST /api/candidate/interview/{session_id}/transcribe` |
 | Voice recording size | 10 MiB (`VOICE_MAX_AUDIO_BYTES`) | `…/transcribe` |
 | Voice use per user | 30 recordings and 900 audio seconds a day (defaults; set in `backend/.env.example`) | `…/transcribe` |
+| Spoken questions | 600 characters per user a day, 1,800 for the whole organisation (defaults); one question of at most 600 characters | `…/speak` |
 | Candidate pool scanned when ranking | newest 500 candidates | `rank-candidates` |
 | Rate limit | 100 requests / 60 s / IP | All routes |
 
@@ -498,6 +501,68 @@ curl -X POST "http://localhost:8000/api/candidate/interview/$SESSION_ID/transcri
   --data-binary @answer.wav
 ```
 
+#### `POST /api/candidate/interview/{session_id}/speak`
+
+Reads one of the interviewer's questions aloud with Groq Orpheus (Phase 8). It works only
+when the server has `VOICE_TTS_PROVIDER=orpheus`; otherwise the app reads questions with the
+browser's own voice and does not call it (the endpoint then answers `503 tts_off`). The audio
+is not stored in the database: a made clip is kept in a short-lived cache (3 days by default)
+and handed to anyone who asks for the same question, which costs no quota. The text always
+comes from the caller's own interview, never from the request.
+
+Request: JSON, and the body is optional.
+
+| Field | Type | Notes |
+|---|---|---|
+| `message_index` | integer 0 to 99, or `null` | Position of the question in the `messages` list that `GET …/{session_id}` returns. It must be an interviewer message. Left out (or no body at all), the latest interviewer question is read. A string, a boolean or a decimal is a `422` |
+
+Response `200`: the question as a WAV file (`Content-Type: audio/wav`, 24 kHz, mono, 16-bit).
+
+| Header | Value |
+|---|---|
+| `X-Voice-Cache` | `hit`: no new Groq call was made for this request (the clip was in the cache, or another request had just started making it). `miss`: the clip was just made |
+| `Cache-Control` | `private, no-store`. The app keeps its own copy of a clip in memory |
+
+Errors. Every one has `detail = {"code", "message"}`, plus `retry_after` (whole seconds) and a
+`Retry-After` header when the wait is known. `message` is short, safe to show, and points the
+candidate to reading the question on the screen. (A body that fails validation is the
+standard FastAPI `422` with a list in `detail`.)
+
+| Code | `detail.code` | When |
+|---|---|---|
+| 400 | `not_a_question` | `message_index` is the candidate's own message |
+| 400 | `text_rejected` | The question has nothing to read aloud (for example only symbols), or Groq refused the text |
+| 404 | `not_found` | Unknown or invalid id, **or not your interview** |
+| 404 | `question_not_found` | No such message, or the interview has no interviewer question yet |
+| 409 | `interview_complete` | The interview is already complete |
+| 413 | `text_rejected` | The question is longer than 600 characters once cleaned |
+| 429 | `user_daily` | This user has used today's allowance of spoken characters |
+| 429 | `org_daily`, `org_minute` | The organisation's allowance is used for that window |
+| 429 | `rate_limited` | Groq is busy; `retry_after` is Groq's wait (60 s when it gave none) |
+| 429 | `cooldown` | Groq was busy a moment ago; calls wait without reaching it |
+| 502 | `silent_audio` | Orpheus answered, but the clip had almost no sound. It is not returned or cached, and Groq still counted its characters |
+| 503 | `tts_off` | `VOICE_TTS_PROVIDER` is not `orpheus` |
+| 503 | `disabled` | `VOICE_ENABLED=false` |
+| 503 | `unavailable` | Orpheus down or timed out, an unreadable reply, or the limit counters could not be reached |
+| 503 | `not_configured` | No Groq key, Groq rejected it, or the Orpheus terms are not accepted in the Groq console |
+
+Notes:
+
+- A cache hit is served even when the user's allowance is used up, or during a cool-down,
+  because it makes no Groq call.
+- A question of more than 200 characters is sent to Groq in several requests (Orpheus accepts
+  200 characters at most per request) and joined into one clip. Each request counts against
+  the organisation's request limits.
+- Ownership and "still open" are checked before anything else, so another user's interview
+  and a finished one use no quota.
+- Example (replace `$TOKEN` and `$SESSION_ID`):
+
+```
+curl -X POST "http://localhost:8000/api/candidate/interview/$SESSION_ID/speak" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"message_index": 0}' -o question.wav -D -
+```
+
 #### `GET /api/candidate/interview/{session_id}/feedback`
 
 Response (`InterviewFeedbackResponse`): `scores` (object), `overall_score`,
@@ -687,6 +752,7 @@ See `docs/architecture/mcp.md` for the gateway design.
 | GET | `/api/candidate/interview/{session_id}` | Logged in | [6](#6-candidate-endpoints) |
 | POST | `/api/candidate/interview/{session_id}/respond` | Logged in | [6](#6-candidate-endpoints) |
 | POST | `/api/candidate/interview/{session_id}/transcribe` | Logged in | [6](#6-candidate-endpoints) |
+| POST | `/api/candidate/interview/{session_id}/speak` | Logged in | [6](#6-candidate-endpoints) |
 | GET | `/api/candidate/interview/{session_id}/feedback` | Logged in | [6](#6-candidate-endpoints) |
 | POST | `/api/recruiter/jd/upload` | `recruiter` | [7](#7-recruiter-endpoints) |
 | GET | `/api/recruiter/jds` | `recruiter` | [7](#7-recruiter-endpoints) |
@@ -698,7 +764,7 @@ See `docs/architecture/mcp.md` for the gateway design.
 | DELETE | `/api/admin/users/{user_id}` | `admin` (stub) | [8](#8-admin-endpoints-stubs) |
 | GET | `/api/health/mcp` | Public | [9](#9-health-endpoints) |
 
-Total: 28 endpoints (3 of them admin stubs).
+Total: 29 endpoints (3 of them admin stubs).
 
 ---
 
@@ -708,6 +774,7 @@ Newest first. Add one line per API change.
 
 | Date | Phase | Change |
 |---|---|---|
+| 2026-11-27 | 8 | Added `POST /api/candidate/interview/{session_id}/speak` (an interviewer question as a WAV file, Orpheus, cached; total now 29). Returns audio, not JSON; errors use the same `{code, message, retry_after?}` object. New 502 status; the browser may read `X-Voice-Cache` and `Retry-After`. |
 | 2026-11-27 | 8 | Added `POST /api/candidate/interview/{session_id}/transcribe` (voice answer to text; the index total is corrected to 28). Its errors use an object `detail` with a `code`. New 503 status and voice limits documented. |
 | 2026-11-09 | 6 | Added this reference. Documents all existing endpoints. |
 | Phase 6 | 6 | Added `GET /api/health/mcp` (MCP gateway health). |

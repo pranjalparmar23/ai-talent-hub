@@ -74,4 +74,7 @@ async def health_check():
 @app.get("/", tags=["system"])
 async def root():
     """Root endpoint — redirects to docs."""
-    return {"message": "AI Recruitment and Multi - Agent Interview Preparation Platform", "docs": "/api/docs"}
+    return {
+        "message": "AI Recruitment and Multi - Agent Interview Preparation Platform",
+        "docs": "/api/docs",
+    }
