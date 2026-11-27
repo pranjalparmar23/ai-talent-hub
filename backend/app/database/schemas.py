@@ -310,6 +310,42 @@ class InterviewFeedbackResponse(BaseModel):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# VOICE (Phase 8)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class VoiceRemaining(BaseModel):
+    """What this user can still use now: the lowest of their own and the
+    organisation's room (speech-to-text requests and audio seconds)."""
+
+    requests: int
+    seconds: int
+
+
+class TranscribeResponse(BaseModel):
+    """POST /interview/{id}/transcribe: the text of one spoken answer. The candidate
+    can edit it before sending it through /respond."""
+
+    text: str
+    audio_seconds: Optional[float] = None
+    # None when the quota counters could not be read; the text is still valid.
+    remaining: Optional[VoiceRemaining] = None
+
+
+class VoiceErrorDetail(BaseModel):
+    """The `detail` of every failed voice call (it is an object here, not a string)."""
+
+    code: str
+    message: str
+    # Seconds until the call could work again; set only when it is known.
+    retry_after: Optional[int] = None
+
+
+class VoiceErrorResponse(BaseModel):
+    detail: VoiceErrorDetail
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # RECRUITER
 # ═════════════════════════════════════════════════════════════════════════════
 
