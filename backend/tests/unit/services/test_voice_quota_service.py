@@ -417,6 +417,89 @@ class TestReserveTextToSpeech:
         assert (await quota.reserve(TTS, "u1", 100)).allowed
 
 
+class TestSeveralRequests:
+    """Text to speech sends one Groq request per chunk, so a call can use several."""
+
+    async def test_each_request_is_counted_but_the_characters_only_once(
+        self, quota, redis
+    ):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+
+        assert decision.allowed
+        assert decision.reservation.requests == 3
+        assert redis.counter("tts:org:day:20261126:requests") == 3
+        assert redis.counter("tts:org:minute:202611261200:requests") == 3
+        assert redis.counter("tts:user:u1:day:20261126:units") == 300
+        assert redis.counter("tts:org:day:20261126:units") == 300
+        assert redis.counter("tts:org:minute:202611261200:units") == 300
+
+    async def test_one_request_is_still_the_default(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 100)
+
+        assert decision.reservation.requests == 1
+        assert redis.counter("tts:org:day:20261126:requests") == 1
+
+    async def test_speech_to_text_can_count_several_too(self, quota, redis):
+        await quota.reserve(STT, "u1", 30, requests=2)
+
+        assert redis.counter("stt:user:u1:day:20261126:requests") == 2
+        assert redis.counter("stt:org:day:20261126:requests") == 2
+        assert redis.counter("stt:org:minute:202611261200:requests") == 2
+
+    async def test_the_minute_cap_counts_every_request_of_the_call(self, quota, redis):
+        # the default cap is 5 requests a minute for the organisation
+        decision = await quota.reserve(TTS, "u1", 300, requests=6)
+
+        assert not decision.allowed
+        assert decision.reason == vq.ORG_MINUTE
+        assert decision.retry_after is not None and decision.retry_after <= 60
+        assert all(int(v) == 0 for v in redis.values.values())  # nothing was kept
+
+    async def test_a_call_that_just_fits_is_allowed(self, quota):
+        assert (await quota.reserve(TTS, "u1", 300, requests=5)).allowed
+
+    async def test_a_second_call_sees_the_requests_of_the_first(self, quota, redis):
+        await quota.reserve(TTS, "u1", 300, requests=3)
+
+        decision = await quota.reserve(TTS, "u2", 300, requests=3)
+
+        assert decision.reason == vq.ORG_MINUTE
+        assert redis.counter("tts:org:minute:202611261200:requests") == 3
+        assert redis.counter("tts:org:minute:202611261200:units") == 300
+
+    async def test_the_daily_request_cap_counts_every_request_too(self, quota):
+        limit(quota, tts_org_daily_requests=4)
+
+        assert (await quota.reserve(TTS, "u1", 100, requests=3)).allowed
+        assert (await quota.reserve(TTS, "u2", 100, requests=2)).reason == vq.ORG_DAILY
+
+    async def test_remaining_requests_follow_what_was_used(self, quota):
+        await quota.reserve(TTS, "u1", 300, requests=3)
+
+        room = await quota.remaining(TTS, "u1")
+
+        assert room.requests == 2  # 5 a minute, 3 used
+
+    @pytest.mark.parametrize("requests", [0, -1, 1.5, True, None, "2"])
+    async def test_a_bad_number_of_requests_is_a_programming_error(
+        self, quota, redis, requests
+    ):
+        with pytest.raises(ValueError, match="requests"):
+            await quota.reserve(TTS, "u1", 100, requests=requests)
+        assert redis.calls == 0
+
+    async def test_requests_can_only_be_given_by_name(self, quota):
+        with pytest.raises(TypeError):
+            await quota.reserve(TTS, "u1", 100, 3)
+
+    async def test_release_returns_every_request(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+
+        await quota.release(decision.reservation)
+
+        assert all(int(v) == 0 for v in redis.values.values())
+
+
 # ── Correcting and returning a reservation ───────────────────────────────────
 
 
@@ -503,6 +586,80 @@ class TestAdjustAndRelease:
         await quota.release(first.reservation)
 
         assert (await quota.reserve(STT, "u1", 20)).allowed
+
+    async def test_adjust_can_reduce_the_requests_to_what_was_really_sent(
+        self, quota, redis
+    ):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+
+        await quota.adjust(decision.reservation, 130, actual_requests=1)
+
+        assert decision.reservation.requests == 1
+        assert redis.counter("tts:org:day:20261126:requests") == 1
+        assert redis.counter("tts:org:minute:202611261200:requests") == 1
+        assert redis.counter("tts:user:u1:day:20261126:units") == 130
+
+    async def test_adjust_can_change_only_the_requests(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+
+        await quota.adjust(decision.reservation, 300, actual_requests=2)
+
+        assert redis.counter("tts:org:day:20261126:requests") == 2
+        assert redis.counter("tts:user:u1:day:20261126:units") == 300
+
+    async def test_adjust_leaves_the_requests_alone_when_not_asked(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+
+        await quota.adjust(decision.reservation, 130)
+
+        assert redis.counter("tts:org:day:20261126:requests") == 3
+        assert decision.reservation.requests == 3
+
+    async def test_release_after_adjusting_the_requests_returns_everything(
+        self, quota, redis
+    ):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+        await quota.adjust(decision.reservation, 130, actual_requests=1)
+
+        await quota.release(decision.reservation)
+
+        assert all(int(v) == 0 for v in redis.values.values())
+
+    async def test_adjusting_to_the_same_amounts_changes_nothing(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+        calls = redis.calls
+
+        await quota.adjust(decision.reservation, 300, actual_requests=3)
+
+        assert redis.calls == calls
+
+    @pytest.mark.parametrize("requests", [0, -1, 1.5, True])
+    async def test_a_bad_number_of_requests_in_adjust_is_refused(
+        self, quota, redis, requests
+    ):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+
+        with pytest.raises(ValueError, match="actual_requests"):
+            await quota.adjust(decision.reservation, 130, actual_requests=requests)
+
+        assert redis.counter("tts:org:day:20261126:requests") == 3
+        assert redis.counter("tts:user:u1:day:20261126:units") == 300
+
+    async def test_adjusting_requests_after_release_does_nothing(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+        await quota.release(decision.reservation)
+
+        await quota.adjust(decision.reservation, 130, actual_requests=1)
+
+        assert all(int(v) == 0 for v in redis.values.values())
+
+    async def test_adjusting_the_requests_survives_a_redis_failure(self, quota, redis):
+        decision = await quota.reserve(TTS, "u1", 300, requests=3)
+        redis.down = True
+
+        await quota.adjust(decision.reservation, 130, actual_requests=1)  # no error
+
+        assert decision.reservation.requests == 3  # unchanged: nothing was applied
 
     async def test_adjust_survives_a_redis_failure(self, quota, redis):
         decision = await quota.reserve(STT, "u1", 100)
