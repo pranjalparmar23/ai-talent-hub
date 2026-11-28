@@ -1,6 +1,6 @@
 # Voice interview architecture
 
-**Status:** decided 2026-11-25 (Phase 8, Task 1), numbers measured the same day. Implementation follows in Tasks 2–17 (Tasks 2–5 are done).
+**Status:** decided 2026-11-25 (Phase 8, Task 1), numbers measured the same day. Implementation follows in Tasks 2–17 (Tasks 2–6 are done).
 **Owner:** Dev Lead. **Related:** Decision D6 (speech stack), risks R3, R4, R11.
 
 This page records how the interview gets a voice, why, and which numbers the choice rests on. Everything runs on the **Groq free tier**; no paid service is used.
@@ -317,11 +317,65 @@ curl -s -D - -X POST "http://localhost:8000/api/candidate/interview/$SID/speak" 
 
 Play `question.wav`; it should be audible and about 7 s long. Counters: `docker exec ath_redis redis-cli --scan --pattern 'voice:tts:*'`.
 
+## Voice recorder (Task 6)
+
+`frontend/src/voice/useVoiceRecorder.ts` records one spoken answer in the browser. It only records: it hands the audio to the caller, who sends it to `/transcribe` (the controls are Task 8). `frontend/src/voice/recorderSupport.ts` holds the parts that need no microphone, so they can be tested without one.
+
+```ts
+const rec = useVoiceRecorder({ maxSeconds: 120, minSeconds: 0.5, onRecording })
+rec.start()   // asks for the microphone, then records (status: requesting → recording)
+rec.stop()    // ends the recording; onRecording is called when the recorder has flushed
+rec.cancel()  // throws the recording away; nothing is delivered
+// onRecording({ blob, contentType, durationSeconds })
+// also: rec.supported, rec.status, rec.elapsedSeconds, rec.maxSeconds, rec.error, rec.clearError()
+```
+
+**What the caller gets.** `onRecording` is called once for every kept recording, whether the candidate stopped it or it reached the maximum. `contentType` is the type the recorder really used (for example `audio/webm;codecs=opus`) and goes in the `Content-Type` header of the upload. `durationSeconds` is measured with the clock **at the click**, not when the recorder finishes, is rounded to two decimals, and is never more than the maximum. It goes in the `X-Audio-Duration` header, which the server uses to reserve the right amount of quota.
+
+**Format.** The hook asks for the first of `audio/webm;codecs=opus`, `audio/webm`, `audio/ogg;codecs=opus`, `audio/mp4` that `MediaRecorder.isTypeSupported` accepts: webm in Chrome, Edge and Firefox, mp4 in Safari (as far as we know; to be confirmed in Task 15). If the browser supports none of them it chooses its own format, and the hook refuses it (`unsupported`) unless the server accepts that type (`webm`, `ogg`, `mp4`, `mpeg`, `wav`, `flac`). Some browsers only report the type once the recorder is running, so it is read again after start.
+
+**Length.**
+
+| Rule | Value | Why |
+|---|---|---|
+| Maximum | 120 s (`maxSeconds`) | The server's default `VOICE_MAX_RECORDING_SECONDS`. The client does not read the server's value yet (open items) |
+| Automatic stop | 0.5 s before the maximum | The length is measured by the clock, so a recording stopped exactly at the maximum could be a few milliseconds over what the server allows (the maximum plus 2 s of grace) |
+| Minimum | 0.5 s (`minSeconds`) | A shorter recording is a stray click, and a recording uses at least 10 s of the voice allowance. It is not delivered; `error` is `too_short` |
+| No audio | `error` is `recorder_failed` | The recorder gave no data |
+
+**Errors.** The hook returns a code and the screen (Task 8) writes the message. Typing always stays available, so none of these blocks the interview.
+
+| `error` | Cause |
+|---|---|
+| `unsupported` | No `MediaRecorder` or microphone API, a page that is not https or localhost (browsers hide the microphone from other pages), or a recording format the server cannot read |
+| `permission_denied` | The candidate or the browser's policy blocked the microphone |
+| `no_microphone` | No input device |
+| `mic_in_use` | Another app has the microphone, or it could not be started |
+| `recorder_failed` | The recorder failed or gave no audio, the device was unplugged while recording, or the recorder did not finish within 3 s of stop |
+| `too_short` | The recording was shorter than `minSeconds` |
+
+`error` is cleared by the next `start()`, by `clearError()` and by `cancel()`.
+
+**Microphone safety.** The microphone is released (every track stopped, so the browser's recording light goes off) when the recording ends, is cancelled, fails, and when the screen is left. A permission answer that arrives after `cancel()` or after the screen has gone is released at once and starts nothing. A late report from an old recording cannot disturb a new one. React strict mode, which mounts effects twice in development, is covered by a test.
+
+**Privacy.** The audio is a `Blob` in memory, handed to `onRecording`; the hook keeps no copy. Nothing is written to `localStorage`, `sessionStorage`, IndexedDB or the console (a test checks the console and storage). The hook asks for audio only. It does not ask for consent: Task 12 decides whether the microphone button is shown at all.
+
+**Not in this task.** Voice-activity detection and a volume meter (Task 9), browser speech recognition (not used, see Privacy), sending the recording and showing the controls (Task 8).
+
+**Tests.** `recorderSupport.test.ts` (111 tests, plain Node) and `useVoiceRecorder.test.tsx` (72 tests) use a fake `MediaRecorder`, a fake microphone and fake timers, so no real microphone is involved. Hook tests run in jsdom, chosen per file with a `// @vitest-environment jsdom` comment, so the other tests stay in Node. A file with JSX must be `.tsx`. Run `npm test` in `frontend/`. CI runs only `tsc --noEmit` and ESLint on the frontend, not the tests (open items).
+
+**Manual check** (after Task 8 adds the button): allow the microphone, record 5 s, stop, and confirm that the recording light goes off at once. Block the microphone in the browser's site settings and confirm the `permission_denied` message. To see which formats a browser records, run this in its console:
+
+```js
+['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].map(t => [t, MediaRecorder.isTypeSupported(t)])
+```
+
 ## Privacy
 
 - Consent is asked before the first recording (Task 12). Without it the microphone button does not appear.
 - Audio leaves the candidate's browser for our backend, and from there for Groq. Both steps are named in the consent text.
 - A spoken question made with Orpheus is the interviewer's question, not the candidate's voice. The question text is sent to Groq; the clip is cached in Redis for 3 days with no user id in the key (see the Speak endpoint section).
+- The recorder keeps the audio only in memory until it is handed to the upload, and releases the microphone when the recording ends, is cancelled or the screen is left (see the Voice recorder section).
 - Browser speech synthesis runs on the device. Browser speech **recognition** is not used by default: support is uneven and some browsers send audio to the vendor's servers. Treat that as unverified until checked (open items).
 - The measurement script uses synthetic sentences only, saves no audio, and never writes the API key.
 - Monitoring (risk R11) must not log transcripts or audio; only sizes, durations, status codes and latency.
@@ -334,7 +388,7 @@ Play `question.wav`; it should be audible and about 7 s long. Counters: `docker 
 | 3 | `speech_service.py`, Whisper client — **done** | Model, formats, 25 MB free-plan file limit, `language` hint |
 | 4 | `POST /api/candidate/interview/{id}/transcribe` — **done** | Flow above, audio never stored |
 | 5 | `POST …/speak` with cache — **done** | Orpheus limits, 200-character chunks, WAV only |
-| 6 | `useVoiceRecorder` hook | Click to start/stop, timer, maximum length |
+| 6 | `useVoiceRecorder` hook — **done** | Click to start/stop, timer, maximum length |
 | 7 | `useSpeech` hook | Browser-first speaking; calls `/speak` only when the server uses Orpheus, and falls back to the browser voice on any error |
 | 8 | Voice controls in `InterviewChat` | Editable transcript before sending |
 | 9 | Hands-free / voice activity detection | After the basic flow works |
@@ -395,6 +449,10 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 9. **Silence thresholds on real answers.** The filler rule's -0.8 threshold sits between good speech (-0.04, -0.08) and the two silent clips (-1.04, -1.48), but only four clips back it, all synthetic. `no_speech_prob` is always 0 on `whisper-large-v3-turbo`. Check with real microphone recordings (Task 6 onwards and the Task 16 voice evaluation set), and look especially for short, quiet but valid answers being refused.
 10. **Redis memory for cached clips.** A clip is about 470 KB as base64, so a day of Orpheus (about 25 questions) is roughly 12 MB, and 3 days of expiry keeps up to about 35 MB. Check the Redis `maxmemory` and eviction policy of the real deployment; the cache fails open, but the interview history in Redis must not be evicted for it.
 11. **Header exposure.** `X-Voice-Cache` and `Retry-After` are exposed through CORS for the app on :5173. If the frontend is later served through a proxy on the same origin this is harmless, and if a proxy strips unknown headers check it.
+12. **Real microphones.** The hook is tested with fakes only. Check it with a real microphone as soon as Task 8 adds the button, then in Chrome, Firefox, Safari and Edge in Task 15: the format that each browser really records, the size of a 120 s recording (expected to be well under the 10 MiB limit, not measured), that the recording light goes off, and what each browser does when the microphone is blocked.
+13. **Maximum length on the client.** `useVoiceRecorder` uses 120 s unless told otherwise, the server's default, but the server's `VOICE_MAX_RECORDING_SECONDS` is not sent to the client. If it is changed, the client must be told (a small settings endpoint, Task 8 or 12), or the server answers `too_long`.
+14. **Secure context.** The microphone works only on https or localhost. Opening the dev server by its network address (for example from a phone on the same Wi-Fi) shows `unsupported`. Use localhost, or serve https.
+15. **Frontend tests in CI.** The frontend job runs `tsc --noEmit` and ESLint but not `npm test`. Add it once the voice hooks have more tests.
 
 ## Sources (read 2026-11-25)
 
@@ -409,5 +467,6 @@ Each full run spends about 550 of the 3,600 daily Orpheus tokens, so do not run 
 - 2026-11-25: Measured numbers added. Orpheus costs one token per character, and half its clips were nearly silent; the Orpheus terms must be accepted in the Groq console before first use (done for this organisation).
 - 2026-11-26: Task 2 added the quota and cost guard (`voice_quota_service.py`) and the `VOICE_*` quota settings.
 - 2026-11-26: Task 3 added the speech-to-text client (`speech_service.py`) with the silence and filler filter. Checked against real Groq output for the four saved clips: audio length is the longer of the last segment's end and the declared length; a refused recording carries its length so quota is adjusted, not released.
+- 2026-11-28: Task 6 added the voice recorder: `useVoiceRecorder` and `recorderSupport` in `frontend/src/voice/`. Click to start and stop, a timer, an automatic stop at the maximum (120 s, stopping 0.5 s early), recordings under 0.5 s dropped, the length measured at the click for `X-Audio-Duration`, the microphone always released, and error codes for the screen to turn into messages. Added `jsdom` as a frontend dev dependency for hook tests.
 - 2026-11-27: Task 5 added `POST /api/candidate/interview/{id}/speak` (Orpheus text to speech): `wav_audio.py` (Groq's placeholder WAV length, sound check, joining), `tts_service.py` (clean, split at 200 characters, one request per chunk, no retries), `voice_cache.py` (Redis, fail-open), `VoiceService.speak`, the route, the `VOICE_TTS_*` settings, quota reservations of several requests, and `close_tts_client()` on shutdown. The question text comes from the caller's own interview, never from the request. `X-Voice-Cache` and `Retry-After` are exposed through CORS.
 - 2026-11-27: Task 4 added `POST /api/candidate/interview/{id}/transcribe` (`voice_service.py`, the route, the `VOICE_MAX_RECORDING_SECONDS` setting and the voice response schemas). The audio is the raw request body, not a multipart upload, so nothing is spooled to disk; every error of the endpoint has one `{code, message, retry_after?}` body; the shared speech client is closed on shutdown.
