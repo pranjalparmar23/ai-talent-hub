@@ -4,6 +4,7 @@ import {
   AUTO_STOP_MARGIN_SECONDS,
   DEFAULT_MAX_SECONDS,
   MIME_CANDIDATES,
+  MIN_RECORDING_SECONDS,
   autoStopDelayMs,
   baseType,
   formatClock,
@@ -12,6 +13,7 @@ import {
   measuredSeconds,
   micErrorCode,
   normalizeMaxSeconds,
+  normalizeMinSeconds,
   pickMimeType,
   wholeSeconds,
   type RecorderEnv,
@@ -22,6 +24,10 @@ const named = (name: string) => Object.assign(new Error('x'), { name })
 describe('constants', () => {
   it('uses the server default of 120 seconds', () => {
     expect(DEFAULT_MAX_SECONDS).toBe(120)
+  })
+
+  it('ignores recordings of less than half a second', () => {
+    expect(MIN_RECORDING_SECONDS).toBe(0.5)
   })
 
   it('stops a little before the maximum', () => {
@@ -217,6 +223,20 @@ describe('normalizeMaxSeconds', () => {
     [Number.POSITIVE_INFINITY, 120],
   ])('%s → %s', (input, expected) => {
     expect(normalizeMaxSeconds(input)).toBe(expected)
+  })
+})
+
+describe('normalizeMinSeconds', () => {
+  it.each([
+    [2, 2],
+    [0.2, 0.2],
+    [0, 0], // 0 keeps every recording
+    [undefined, 0.5],
+    [-1, 0.5],
+    [Number.NaN, 0.5],
+    [Number.POSITIVE_INFINITY, 0.5],
+  ])('%s → %s', (input, expected) => {
+    expect(normalizeMinSeconds(input)).toBe(expected)
   })
 })
 

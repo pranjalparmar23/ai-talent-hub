@@ -14,6 +14,12 @@
 export const DEFAULT_MAX_SECONDS = 120
 
 /**
+ * A recording shorter than this is not sent: it is a click that was meant to be
+ * something else, and a recording costs the voice allowance at least 10 seconds.
+ */
+export const MIN_RECORDING_SECONDS = 0.5
+
+/**
  * The recording stops this long before the maximum. The length sent to the server is
  * measured by the clock, so a recording stopped exactly at the maximum could be a few
  * milliseconds over what the server allows (the maximum plus 2 s of grace).
@@ -47,7 +53,8 @@ export type RecorderErrorCode =
   | 'permission_denied' // the candidate (or the browser's policy) blocked the microphone
   | 'no_microphone' // no input device
   | 'mic_in_use' // another app has the microphone, or it could not be started
-  | 'recorder_failed' // the recorder failed, or the device went away while recording
+  | 'recorder_failed' // the recorder failed, gave no audio, or the device went away
+  | 'too_short' // stopped almost at once, so nothing was kept
 
 /** What the page offers, as far as recording is concerned. Tests pass their own. */
 export interface RecorderEnv {
@@ -122,6 +129,13 @@ export function micErrorCode(error: unknown): RecorderErrorCode {
     default:
       return 'recorder_failed'
   }
+}
+
+/** The shortest recording to keep: the given one when it is a number of 0 or more, else the default. */
+export function normalizeMinSeconds(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : MIN_RECORDING_SECONDS
 }
 
 /** The maximum length to use: the given one when it is a positive number, else the default. */
